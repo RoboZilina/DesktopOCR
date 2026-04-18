@@ -1,0 +1,9 @@
+winsdk==0.10.0
+opencv-python
+numpy
+onnxruntime-directml
+PyQt6
+qasync
+pyperclip
+pyttsx3
+nuitka
