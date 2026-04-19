@@ -92,3 +92,5 @@ Investigate why desktop scripts / future `.exe` startup appear to not work or se
 - If script appears stuck, first confirm whether it is waiting for input or `cv2.waitKey(0)`.
 - For automated checks, pipe HWND input and avoid waiting window paths.
 - Do not mix global Python with project venv when installing/running (`.venv\Scripts\python.exe`).
+test line
+
