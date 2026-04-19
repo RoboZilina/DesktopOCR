@@ -1,9 +1,21 @@
+# DesktopOCR dependencies
+# Target runtime: Python 3.11.x on Windows
+
+# WinRT capture bindings (aligned with current code/imports)
 winsdk==1.0.0b10
-opencv-python
-numpy
-onnxruntime-directml
-PyQt6
-qasync
-pyperclip
-pyttsx3
-nuitka
+
+# OCR + image processing
+opencv-python==4.13.0.92
+numpy==2.4.4
+onnxruntime-directml==1.24.4
+
+# UI / async integration
+PyQt6==6.11.0
+qasync==0.28.0
+
+# Desktop UX helpers
+pyperclip==1.11.0
+pyttsx3==2.99
+
+# Packaging
+nuitka==4.0.8

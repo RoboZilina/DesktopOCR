@@ -1,0 +1,35 @@
+# Python virtual environments
+.venv/
+venv/
+
+# Python bytecode/cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Build/distribution artifacts
+build/
+dist/
+*.egg-info/
+
+# Nuitka / packaging outputs
+*.exe
+*.dll
+*.lib
+*.exp
+*.manifest
+*.pkg
+
+# Logs and temp files
+*.log
+*.tmp
+*.temp
+
+# IDE/editor local files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
