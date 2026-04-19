@@ -21,7 +21,7 @@ def list_windows():
             if length > 0:
                 buff = ctypes.create_unicode_buffer(length + 1)
                 GetWindowText(hwnd, buff, length + 1)
-                windows.append((hwnd, buff.value))
+                windows.append((int(hwnd), buff.value))
         return True
 
     EnumWindows(EnumWindowsProc(foreach_window), 0)

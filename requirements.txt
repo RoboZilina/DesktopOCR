@@ -1,4 +1,4 @@
-winsdk==0.10.0
+winsdk==1.0.0b10
 opencv-python
 numpy
 onnxruntime-directml
