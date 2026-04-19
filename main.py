@@ -1,5 +1,6 @@
 import asyncio
 import ctypes
+import ctypes.wintypes
 import logging
 from datetime import datetime
 
@@ -8,14 +9,20 @@ from core.capture import ScreenCapture
 from core.capture_pipeline import CapturePipeline
 
 def list_windows():
-    EnumWindows = ctypes.windll.user32.EnumWindows
-    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
-    GetWindowText = ctypes.windll.user32.GetWindowTextW
-    GetWindowTextLength = ctypes.windll.user32.GetWindowTextLengthW
-    IsWindowVisible = ctypes.windll.user32.IsWindowVisible
+    user32 = ctypes.windll.user32
+    EnumWindows = user32.EnumWindows
+    GetWindowText = user32.GetWindowTextW
+    GetWindowTextLength = user32.GetWindowTextLengthW
+    IsWindowVisible = user32.IsWindowVisible
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(
+        ctypes.wintypes.BOOL,
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.LPARAM,
+    )
 
     windows = []
-    def foreach_window(hwnd, lParam):
+    def foreach_window(hwnd, l_param):
         if IsWindowVisible(hwnd):
             length = GetWindowTextLength(hwnd)
             if length > 0:
@@ -24,7 +31,7 @@ def list_windows():
                 windows.append((int(hwnd), buff.value))
         return True
 
-    EnumWindows(EnumWindowsProc(foreach_window), 0)
+    EnumWindows(WNDENUMPROC(foreach_window), 0)
     
     print("--- Visible Windows ---")
     for hwnd, title in windows:

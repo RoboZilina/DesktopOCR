@@ -1,5 +1,6 @@
 import asyncio
 import ctypes
+import ctypes.wintypes
 import sys
 import os
 
@@ -10,14 +11,21 @@ import cv2
 from core.capture import ScreenCapture
 
 def list_windows():
-    EnumWindows = ctypes.windll.user32.EnumWindows
-    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
-    GetWindowText = ctypes.windll.user32.GetWindowTextW
-    GetWindowTextLength = ctypes.windll.user32.GetWindowTextLengthW
-    IsWindowVisible = ctypes.windll.user32.IsWindowVisible
+    user32 = ctypes.windll.user32
+    EnumWindows = user32.EnumWindows
+    GetWindowText = user32.GetWindowTextW
+    GetWindowTextLength = user32.GetWindowTextLengthW
+    IsWindowVisible = user32.IsWindowVisible
+
+    WNDENUMPROC = ctypes.WINFUNCTYPE(
+        ctypes.wintypes.BOOL,
+        ctypes.wintypes.HWND,
+        ctypes.wintypes.LPARAM,
+    )
 
     windows = []
-    def foreach_window(hwnd, lParam):
+
+    def foreach_window(hwnd, l_param):
         if IsWindowVisible(hwnd):
             length = GetWindowTextLength(hwnd)
             if length > 0:
@@ -26,7 +34,7 @@ def list_windows():
                 windows.append((int(hwnd), buff.value))
         return True
 
-    EnumWindows(EnumWindowsProc(foreach_window), 0)
+    EnumWindows(WNDENUMPROC(foreach_window), 0)
     
     print("--- Visible Windows ---")
     for hwnd, title in windows:
@@ -35,16 +43,25 @@ def list_windows():
 
 async def main():
     list_windows()
-    
-    user_input = input("\nEnter HWND (hex like 0x1A2B or decimal): ").strip()
+
+    try:
+        user_input = input("\nEnter HWND (hex like 0x1A2B or decimal): ").strip()
+    except EOFError:
+        print("No interactive input detected (EOF). Run this manually in a terminal and enter a HWND.")
+        return
+
     if not user_input:
         print("No HWND provided. Exiting.")
         return
 
-    if user_input.lower().startswith("0x"):
-        hwnd = int(user_input, 16)
-    else:
-        hwnd = int(user_input)
+    try:
+        if user_input.lower().startswith("0x"):
+            hwnd = int(user_input, 16)
+        else:
+            hwnd = int(user_input)
+    except ValueError:
+        print(f"Invalid HWND value: '{user_input}'. Use decimal or hex like 0x1A2B.")
+        return
         
     print(f"Initializing ScreenCapture for HWND {hwnd} (0x{hwnd:08X})")
     capture = ScreenCapture(hwnd)
@@ -53,6 +70,8 @@ async def main():
     try:
         print("Attempting to capture frame...")
         frame = await capture.get_frame()
+        if getattr(capture, "_use_bitblt", False):
+            print("WinRT failed during init. Capture is running on BitBlt fallback.")
         
         if frame is None:
             print("Frame was None - identical frame or capture failed")
@@ -65,7 +84,8 @@ async def main():
             cv2.destroyAllWindows()
             
     except Exception as e:
-        print(f"WinRT Native Capture Failure: {e}")
+        print(f"Capture test failed: {e}")
+        print("If this is WinRT-related, debug winsdk/GraphicsCapture first, then verify BitBlt fallback.")
         import traceback
         traceback.print_exc()
     finally:
