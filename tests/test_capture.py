@@ -11,7 +11,8 @@ from core.capture import ScreenCapture
 
 def list_windows():
     EnumWindows = ctypes.windll.user32.EnumWindows
-    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.POINTER(ctypes.c_int), ctypes.POINTER(ctypes.c_int))
+    import ctypes.wintypes
+    EnumWindowsProc = ctypes.WINFUNCTYPE(ctypes.wintypes.BOOL, ctypes.wintypes.HWND, ctypes.wintypes.LPARAM)
     GetWindowText = ctypes.windll.user32.GetWindowTextW
     GetWindowTextLength = ctypes.windll.user32.GetWindowTextLengthW
     IsWindowVisible = ctypes.windll.user32.IsWindowVisible
@@ -23,7 +24,7 @@ def list_windows():
             if length > 0:
                 buff = ctypes.create_unicode_buffer(length + 1)
                 GetWindowText(hwnd, buff, length + 1)
-                windows.append((int(hwnd), buff.value))
+                windows.append((hwnd, buff.value))
         return True
 
     EnumWindows(EnumWindowsProc(foreach_window), 0)
