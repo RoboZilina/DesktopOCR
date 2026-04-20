@@ -65,7 +65,8 @@ async def main():
         
     print(f"Initializing ScreenCapture for HWND {hwnd} (0x{hwnd:08X})")
     capture = ScreenCapture(hwnd)
-    capture.set_region(0, 0, 800, 200)
+    capture.set_region(0, 540, 1280, 180)
+
     
     try:
         print("Attempting to capture frame...")
@@ -96,3 +97,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
+rect = ctypes.wintypes.RECT()
+ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect))
+print(f"Client area: {rect.right}x{rect.bottom}")

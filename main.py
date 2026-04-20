@@ -67,7 +67,8 @@ async def main():
     capture = ScreenCapture(hwnd)
     
     # default VN text box region config based on requirements
-    capture.set_region(0, 0, 800, 200)  
+    capture.set_region(0, 540, 1280, 180)
+  
     
     pipeline = CapturePipeline(engine_manager, capture)
 
