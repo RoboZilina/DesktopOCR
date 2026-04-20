@@ -152,7 +152,7 @@ class EngineManager:
             }
 
         statuses["paddle"]["note"] = "primary_accuracy_pipeline"
-        statuses["windows_ocr"]["note"] = "stub_not_implemented"
+        statuses["windows_ocr"]["note"] = "guarded_runtime_engine"
 
         try:
             __import__("easyocr")
@@ -668,9 +668,27 @@ class EngineManager:
         return self._current_id
 
     async def _load_windows_ocr(self):
-        reason = "windows_ocr is not implemented yet in this desktop pipeline"
-        logger.warning(reason)
-        return UnavailableEngine("windows_ocr", reason)
+        try:
+            from core.windows_ocr import WindowsOCR
+        except Exception as e:
+            reason = f"windows_ocr import failed: {e}"
+            logger.warning(reason)
+            return UnavailableEngine("windows_ocr", reason)
+
+        try:
+            engine = WindowsOCR()
+            await engine.load()
+        except Exception as e:
+            reason = f"windows_ocr init failed: {e}"
+            logger.warning(reason)
+            return UnavailableEngine("windows_ocr", reason)
+
+        if not getattr(engine, "available", False):
+            reason = "windows_ocr unavailable (Japanese language pack or runtime prerequisites missing)"
+            logger.warning(reason)
+            return UnavailableEngine("windows_ocr", reason)
+
+        return engine
 
     async def _load_easyocr(self):
         try:

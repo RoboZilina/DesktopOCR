@@ -59,7 +59,14 @@ class WindowsOCR:
 
     async def recognize(self, image: np.ndarray) -> dict:
         if not self.available or self._engine is None:
-            return {"text": "", "confidence": None}
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "meta": {
+                    "engine": "windows_ocr",
+                    "warning": "windows_ocr_unavailable",
+                },
+            }
 
         try:
             # winsdk 0.10.0
@@ -83,11 +90,27 @@ class WindowsOCR:
             )
             
             # Extract result.text from OcrResult
-            return {"text": result.text, "confidence": None}
+            text = str(getattr(result, "text", "") or "")
+            return {
+                "text": text,
+                "confidence": 0.0,
+                "meta": {
+                    "engine": "windows_ocr",
+                    "ocr_chars": len(text),
+                    "warning": "windows_ocr_confidence_unavailable",
+                },
+            }
             
         except Exception as e:
             logger.error(f"Windows OCR recognition error: {e}")
-            return {"text": "", "confidence": None}
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "meta": {
+                    "engine": "windows_ocr",
+                    "warning": f"windows_ocr_error: {e}",
+                },
+            }
 
     async def dispose(self):
         self._engine = None
