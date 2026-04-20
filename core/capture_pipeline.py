@@ -1,15 +1,13 @@
 import asyncio
 import difflib
 import logging
-import os
 from collections import Counter
 
 from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
-from logic.validator import is_valid_japanese, clean_ocr_output, score_japanese_density
+from logic.validator import score_japanese_density
 
 logger = logging.getLogger(__name__)
-VALIDATOR_DISABLED = os.getenv("DESKTOCR_DISABLE_VALIDATOR", "0") == "1"
 
 class CapturePipeline:
     def __init__(self, engine_manager: EngineManager, capture: ScreenCapture):
@@ -52,55 +50,24 @@ class CapturePipeline:
             if self.capture_generation != my_gen:
                 return None
                 
-            if getattr(self, 'multi_pass_enabled', False):
-                res = await self._multi_pass(frame, my_gen) or {"text": "", "confidence": 0.0}
-            else:
-                res = await self.engine_manager.run_ocr(frame)
+            res = await self.engine_manager.run_ocr(frame)
             
             if self.capture_generation != my_gen:
                 return None
                 
-            text = res.get("text", "")
+            text = (res.get("text", "") or "").strip()
             conf = res.get("confidence")
             meta = res.get("meta", {}) if isinstance(res, dict) else {}
             self._update_stats(meta)
 
-            if VALIDATOR_DISABLED:
-                cleaned = clean_ocr_output(text)
-                if not cleaned:
-                    return None
-                if cleaned == self._last_result:
-                    return None
-                if self._is_near_duplicate(cleaned, self._last_result):
-                    return None
-                self._last_result = cleaned
-                self._stats["chars_emitted"] += len(cleaned)
+            if not text:
                 self._maybe_log_stats()
-                return {"text": cleaned, "confidence": conf if conf is not None else 0.0}
-            
-            if is_valid_japanese(text, conf):
-                cleaned = clean_ocr_output(text)
-                if not cleaned:
-                    return None
-                if cleaned == self._last_result:
-                    return None
-                if self._is_near_duplicate(cleaned, self._last_result):
-                    return None
-                self._last_result = cleaned
-                self._stats["chars_emitted"] += len(cleaned)
-                self._maybe_log_stats()
-                return {"text": cleaned, "confidence": conf}
+                return None
 
-            if text:
-                logger.info(
-                    "OCR dropped by validator | conf=%s | text=%r",
-                    f"{conf:.3f}" if isinstance(conf, (int, float)) else conf,
-                    text,
-                )
-
+            self._last_result = text
+            self._stats["chars_emitted"] += len(text)
             self._maybe_log_stats()
-                
-            return None
+            return {"text": text, "confidence": conf if conf is not None else 0.0}
             
         except Exception as e:
             logger.error(f"Error during capture_once: {e}")
