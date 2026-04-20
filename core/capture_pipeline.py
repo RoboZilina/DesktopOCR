@@ -56,6 +56,13 @@ class CapturePipeline:
                 cleaned = clean_ocr_output(text)
                 self._last_result = cleaned
                 return {"text": cleaned, "confidence": conf}
+
+            if text:
+                logger.info(
+                    "OCR dropped by validator | conf=%s | text=%r",
+                    f"{conf:.3f}" if isinstance(conf, (int, float)) else conf,
+                    text,
+                )
                 
             return None
             

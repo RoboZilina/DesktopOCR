@@ -8,7 +8,8 @@ JAPANESE_RANGES = [
     (0xFF65, 0xFF9F),  # Halfwidth Katakana
 ]
 
-CONFIDENCE_THRESHOLD = 0.75
+CONFIDENCE_THRESHOLD = 0.45
+LOW_CONF_JP_RATIO_THRESHOLD = 0.8
 
 def is_valid_japanese(text: str, confidence: float | None = None) -> bool:
     """
@@ -17,16 +18,19 @@ def is_valid_japanese(text: str, confidence: float | None = None) -> bool:
     """
     if not text or len(text) < 2:
         return False
+
+    jp_ratio = score_japanese_density(text) / len(text)
         
     # Confidence gate (from OCR engine)
     if confidence is not None and confidence < CONFIDENCE_THRESHOLD:
-        return False
+        # Confidence values can be poorly calibrated across OCR model variants.
+        # For strong Japanese-only outputs, allow pass-through despite low confidence.
+        if jp_ratio < LOW_CONF_JP_RATIO_THRESHOLD:
+            return False
         
     # Japanese character ratio gate
-    jp_chars = score_japanese_density(text)
-    
     # Return True only if ratio >= 0.5
-    return (jp_chars / len(text)) >= 0.5
+    return jp_ratio >= 0.5
 
 def score_japanese_density(text: str) -> float:
     """

@@ -1,12 +1,22 @@
+import argparse
 import asyncio
 import ctypes
 import ctypes.wintypes
 import logging
+import time
 from datetime import datetime
 
 from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
 from core.capture_pipeline import CapturePipeline
+from logic.validator import is_valid_japanese, clean_ocr_output
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="DesktopOCR console runner")
+    parser.add_argument("--hwnd", type=str, help="Window handle (hex like 0x1A2B or decimal)")
+    parser.add_argument("--debug-once", action="store_true", help="Run one raw OCR diagnostic pass before loop")
+    return parser.parse_args()
 
 def list_windows():
     user32 = ctypes.windll.user32
@@ -39,22 +49,31 @@ def list_windows():
     print("-----------------------")
 
 async def main():
+    args = parse_args()
+
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
 
     list_windows()
 
-    print("\nRun tests/test_capture.py first to find your game HWND if unsure.")
-    user_input = input("Enter HWND (hex like 0x1A2B or decimal): ").strip()
+    if args.hwnd:
+        user_input = args.hwnd.strip()
+    else:
+        print("\nRun tests/test_capture.py first to find your game HWND if unsure.")
+        user_input = input("Enter HWND (hex like 0x1A2B or decimal): ").strip()
     
     if not user_input:
         print("No HWND provided. Exiting.")
         return
 
-    if user_input.lower().startswith("0x"):
-        hwnd = int(user_input, 16)
-    else:
-        hwnd = int(user_input)
+    try:
+        if user_input.lower().startswith("0x"):
+            hwnd = int(user_input, 16)
+        else:
+            hwnd = int(user_input)
+    except ValueError:
+        logger.error("Invalid HWND value '%s'. Use decimal or hex like 0x1A2B.", user_input)
+        return
 
     MODEL_CONFIG = {
         "det": "PP-OCRv5_server_det_infer.onnx",
@@ -78,6 +97,45 @@ async def main():
         if not success:
             logger.error("Failed to load server engine.")
             return
+
+        if args.debug_once:
+            logger.info("Running one-shot OCR debug pass...")
+            frame = await capture.get_frame()
+            if frame is None:
+                logger.warning("Debug pass: no frame returned (identical frame or capture failed).")
+            else:
+                logger.info(
+                    "Debug frame | region=%s | shape=%s | bitblt_fallback=%s",
+                    getattr(capture, "_region", None),
+                    getattr(frame, "shape", None),
+                    getattr(capture, "_use_bitblt", False),
+                )
+
+                ocr_impl = getattr(engine_manager, "_current_instance", None)
+                if ocr_impl is not None and hasattr(ocr_impl, "detect"):
+                    det_t0 = time.perf_counter()
+                    boxes = await ocr_impl.detect(frame)
+                    det_ms = (time.perf_counter() - det_t0) * 1000.0
+                    logger.info("Debug detect | boxes=%d | time_ms=%.1f", len(boxes), det_ms)
+
+                ocr_t0 = time.perf_counter()
+                raw = await engine_manager.run_ocr(frame)
+                ocr_ms = (time.perf_counter() - ocr_t0) * 1000.0
+                raw_text = raw.get("text", "")
+                raw_conf = raw.get("confidence", 0.0)
+                valid = is_valid_japanese(raw_text, raw_conf)
+                cleaned = clean_ocr_output(raw_text)
+                logger.info(
+                    "Debug raw OCR | conf=%.3f | time_ms=%.1f | text=%r",
+                    raw_conf,
+                    ocr_ms,
+                    raw_text,
+                )
+                logger.info(
+                    "Debug validator | valid=%s | cleaned=%r",
+                    valid,
+                    cleaned,
+                )
 
         logger.info("Engine ready. Starting capture loop (Ctrl+C to stop)...")
         while True:

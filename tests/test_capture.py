@@ -97,6 +97,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         pass
-rect = ctypes.wintypes.RECT()
-ctypes.windll.user32.GetClientRect(hwnd, ctypes.byref(rect))
-print(f"Client area: {rect.right}x{rect.bottom}")

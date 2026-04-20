@@ -12,7 +12,7 @@ PAD_RIGHT = 12
 PAD_TOP = 12
 PAD_BOTTOM = 12
 
-MIN_BOX_AREA = 40 * 40  # noise-box filter threshold (pixels²)
+MIN_BOX_AREA = 24 * 24  # balanced noise-box filter threshold (pixels²)
 
 def image_to_det_tensor(image: np.ndarray) -> np.ndarray:
     """
@@ -32,6 +32,9 @@ def image_to_det_tensor(image: np.ndarray) -> np.ndarray:
     canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
     canvas[:new_h, :new_w] = resized
     
+    # Convert BGR (OpenCV) -> RGB (PP-OCR preprocessing expectation)
+    canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+
     # Normalize: (pixel/255 - 0.5) / 0.5
     img_float = canvas.astype(np.float32)
     img_float = (img_float / 255.0 - 0.5) / 0.5
@@ -63,6 +66,9 @@ def image_to_rec_tensor(image: np.ndarray) -> np.ndarray:
     canvas = np.zeros((target_h, max_w, 3), dtype=np.uint8)
     canvas[:, :new_w] = resized
     
+    # Convert BGR (OpenCV) -> RGB (PP-OCR preprocessing expectation)
+    canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+
     # Normalize: same as above
     img_float = canvas.astype(np.float32)
     img_float = (img_float / 255.0 - 0.5) / 0.5
@@ -109,7 +115,7 @@ def crop_box(image: np.ndarray, box: list) -> np.ndarray | None:
 
     return image[y1:y2, x1:x2].copy()
 
-def filter_noise_boxes(boxes: list, min_area: int = 1600) -> list:
+def filter_noise_boxes(boxes: list, min_area: int = MIN_BOX_AREA) -> list:
     filtered = []
     for box in boxes:
         x1, y1, x2, y2 = box

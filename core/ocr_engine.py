@@ -128,16 +128,25 @@ class PaddleOCR:
 
             map_h, map_w = map_2d.shape
 
-            # Threshold map at 0.3
-            threshold = 0.3
+            # Threshold map tuned for desktop-captured VN subtitles
+            # (BitBlt + transparency/background blending often needs higher recall)
+            threshold = 0.18
             binary_map = (map_2d > threshold).astype(np.uint8)
 
             # Find connected components
             num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
 
             boxes = []
-            scale_x = w_orig / map_w
-            scale_y = h_orig / map_h
+
+            # image_to_det_tensor() letterboxes with a UNIFORM scale into 960x960 canvas
+            # (top-left aligned). To map DB-map coordinates back to original image space,
+            # use the inverse of that uniform scale, not separate x/y ratios from
+            # original dimensions (which distorts y for very wide subtitle strips).
+            det_input_size = 960.0
+            uniform_scale = min(det_input_size / w_orig, det_input_size / h_orig)
+            inv_scale = 1.0 / uniform_scale if uniform_scale > 0 else 1.0
+            map_to_input_x = det_input_size / map_w
+            map_to_input_y = det_input_size / map_h
 
             # Skip label 0 which is background
             for label in range(1, num_labels):
@@ -156,10 +165,16 @@ class PaddleOCR:
                 p_max_x = min(map_w, max_x + PAD_RIGHT + 1)
                 p_max_y = min(map_h, max_y + PAD_BOTTOM + 1)
 
-                x1 = p_min_x * scale_x
-                y1 = p_min_y * scale_y
-                x2 = p_max_x * scale_x
-                y2 = p_max_y * scale_y
+                x1 = p_min_x * map_to_input_x * inv_scale
+                y1 = p_min_y * map_to_input_y * inv_scale
+                x2 = p_max_x * map_to_input_x * inv_scale
+                y2 = p_max_y * map_to_input_y * inv_scale
+
+                # Clamp remapped coordinates to original image bounds
+                x1 = max(0.0, min(float(w_orig), x1))
+                y1 = max(0.0, min(float(h_orig), y1))
+                x2 = max(0.0, min(float(w_orig), x2))
+                y2 = max(0.0, min(float(h_orig), y2))
 
                 boxes.append([x1, y1, x2, y2])
 
@@ -212,6 +227,7 @@ class PaddleOCR:
                 prev = -1
                 chars = []
                 max_probs = []
+                char_probs = []
 
                 for t in range(time_steps):
                     timestep_logits = logits[b, t, :]
@@ -226,11 +242,18 @@ class PaddleOCR:
                         dict_idx = max_idx - 1
                         if 0 <= dict_idx < len(self.dict):
                             chars.append(self.dict[dict_idx])
+                            char_probs.append(max_val)
 
                     prev = max_idx
 
                 texts.append("".join(chars))
-                conf = float(np.mean(max_probs)) if max_probs else 0.0
+                # Confidence should reflect decoded characters, not all CTC timesteps.
+                # Averaging across every timestep can collapse confidence toward zero
+                # on long sequences with many blank/repeated steps.
+                if char_probs:
+                    conf = float(np.mean(char_probs))
+                else:
+                    conf = float(np.mean(max_probs)) if max_probs else 0.0
                 avg_confidences.append(conf)
 
             return {"text": texts[0] if texts else "", "confidence": avg_confidences[0] if avg_confidences else 0.0}
