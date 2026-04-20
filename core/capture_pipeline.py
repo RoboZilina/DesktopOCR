@@ -67,7 +67,11 @@ class CapturePipeline:
             self._last_result = text
             self._stats["chars_emitted"] += len(text)
             self._maybe_log_stats()
-            return {"text": text, "confidence": conf if conf is not None else 0.0}
+            return {
+                "text": text,
+                "confidence": conf if conf is not None else 0.0,
+                "meta": meta,
+            }
             
         except Exception as e:
             logger.error(f"Error during capture_once: {e}")

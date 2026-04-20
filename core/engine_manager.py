@@ -7,7 +7,7 @@ import numpy as np
 
 from core.ocr_engine import PaddleOCR
 from core.tensor_utils import PAD_LEFT, PAD_RIGHT, PAD_TOP, PAD_BOTTOM, preprocess_paddle_slice
-from logic.validator import score_japanese_density
+from logic.validator import clean_ocr_output, is_valid_japanese, score_japanese_density
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,91 @@ def _web_parity_mode_enabled() -> bool:
 def _raw_ocr_mode_enabled() -> bool:
     return os.getenv("DESKTOCR_RAW_OCR_MODE", "0") == "1"
 
+
+def _validator_disabled() -> bool:
+    return os.getenv("DESKTOCR_DISABLE_VALIDATOR", "0") == "1"
+
+
+class UnavailableEngine:
+    def __init__(self, engine_id: str, reason: str):
+        self.engine_id = engine_id
+        self.reason = reason
+
+    async def recognize(self, _image: np.ndarray) -> dict:
+        return {
+            "text": "",
+            "confidence": 0.0,
+            "meta": {
+                "warning": self.reason,
+                "engine": self.engine_id,
+            },
+        }
+
+    async def dispose(self):
+        return
+
+
+class EasyOCREngine:
+    def __init__(self):
+        self._reader = None
+        self._load_lock = asyncio.Lock()
+
+    async def load(self):
+        async with self._load_lock:
+            if self._reader is not None:
+                return self
+
+            def _build_reader():
+                import easyocr
+
+                return easyocr.Reader(["ja", "en"], gpu=False, verbose=False)
+
+            loop = asyncio.get_running_loop()
+            self._reader = await loop.run_in_executor(None, _build_reader)
+        return self
+
+    async def recognize(self, image: np.ndarray) -> dict:
+        if self._reader is None:
+            return {
+                "text": "",
+                "confidence": 0.0,
+                "meta": {"warning": "easyocr_not_loaded", "engine": "easyocr"},
+            }
+
+        loop = asyncio.get_running_loop()
+
+        def _run_readtext():
+            return self._reader.readtext(image, detail=1, paragraph=False)
+
+        rows = await loop.run_in_executor(None, _run_readtext)
+        texts: list[str] = []
+        confidences: list[float] = []
+        for row in rows:
+            if not isinstance(row, (list, tuple)) or len(row) < 3:
+                continue
+            text = str(row[1] or "").strip()
+            conf = float(row[2] or 0.0)
+            if text:
+                texts.append(text)
+                confidences.append(conf)
+
+        final_text = "\n".join(texts)
+        avg_conf = float(sum(confidences) / len(confidences)) if confidences else 0.0
+        return {
+            "text": final_text,
+            "confidence": avg_conf,
+            "meta": {
+                "boxes_raw": len(rows),
+                "boxes_merged": 0,
+                "fallback_used": False,
+                "ocr_chars": len(final_text),
+                "engine": "easyocr",
+            },
+        }
+
+    async def dispose(self):
+        self._reader = None
+
 class EngineManager:
     def __init__(self, models_dir: str, model_config: dict):
         self.models_dir = models_dir
@@ -38,38 +123,72 @@ class EngineManager:
             "ocr_chars": 0,
         }
         
+        self._engine_aliases = {
+            "server": "paddle",
+        }
         self._engines = {
-            "server": {"instance": None, "state": "not_loaded", "task": None},
-            "windows_ocr": {"instance": None, "state": "not_loaded", "task": None}
+            "paddle": {"instance": None, "state": "not_loaded", "task": None},
+            "windows_ocr": {"instance": None, "state": "not_loaded", "task": None},
+            "easyocr": {"instance": None, "state": "not_loaded", "task": None},
         }
         
         self._current_id = None
         self._current_instance = None
         self._switch_lock = asyncio.Lock()
 
+    def _resolve_engine_id(self, engine_id: str) -> str:
+        return self._engine_aliases.get(engine_id, engine_id)
+
+    def get_supported_engines(self) -> list[str]:
+        return list(self._engines.keys())
+
+    def get_engine_status(self) -> dict[str, dict]:
+        statuses: dict[str, dict] = {}
+        for engine_id, meta in self._engines.items():
+            statuses[engine_id] = {
+                "state": meta.get("state", "unknown"),
+                "loaded": bool(meta.get("instance") is not None),
+                "ready": bool(meta.get("state") == "ready"),
+            }
+
+        statuses["paddle"]["note"] = "primary_accuracy_pipeline"
+        statuses["windows_ocr"]["note"] = "stub_not_implemented"
+
+        try:
+            __import__("easyocr")
+            statuses["easyocr"]["dependency"] = "installed"
+        except Exception:
+            statuses["easyocr"]["dependency"] = "missing"
+            statuses["easyocr"]["note"] = "install easyocr to enable"
+
+        return statuses
+
     async def switch_engine(self, engine_id: str) -> bool:
-        if engine_id not in self._engines:
+        resolved_engine_id = self._resolve_engine_id(engine_id)
+
+        if resolved_engine_id not in self._engines:
             logger.error(f"Engine '{engine_id}' is not supported.")
             return False
             
         async with self._switch_lock:
-            if self._current_id == engine_id and self._engines[engine_id]["state"] == "ready":
+            if self._current_id == resolved_engine_id and self._engines[resolved_engine_id]["state"] == "ready":
                 return True
                 
             try:
-                instance = await self.get_or_load_engine(engine_id)
-                self._current_id = engine_id
+                instance = await self.get_or_load_engine(resolved_engine_id)
+                self._current_id = resolved_engine_id
                 self._current_instance = instance
-                logger.info(f"Successfully switched to engine: {engine_id}")
+                logger.info(f"Successfully switched to engine: {resolved_engine_id}")
                 return True
             except Exception as e:
-                logger.error(f"Failed to switch to engine {engine_id}: {e}")
+                logger.error(f"Failed to switch to engine {resolved_engine_id}: {e}")
                 return False
 
     async def get_or_load_engine(self, engine_id: str):
-        meta = self._engines.get(engine_id)
+        resolved_engine_id = self._resolve_engine_id(engine_id)
+        meta = self._engines.get(resolved_engine_id)
         if not meta:
-            raise ValueError(f"Unknown engine: {engine_id}")
+            raise ValueError(f"Unknown engine: {resolved_engine_id}")
             
         if meta["state"] == "ready":
             return meta["instance"]
@@ -86,13 +205,15 @@ class EngineManager:
         
         async def _load_task():
             try:
-                if engine_id == "server":
+                if resolved_engine_id == "paddle":
                     engine = PaddleOCR(self.models_dir, self.model_config)
                     await engine.load()
-                elif engine_id == "windows_ocr":
+                elif resolved_engine_id == "windows_ocr":
                     engine = await self._load_windows_ocr()
+                elif resolved_engine_id == "easyocr":
+                    engine = await self._load_easyocr()
                 else:
-                    raise ValueError(f"Unknown engine ID '{engine_id}'")
+                    raise ValueError(f"Unknown engine ID '{resolved_engine_id}'")
                     
                 meta["instance"] = engine
                 meta["state"] = "ready"
@@ -112,35 +233,80 @@ class EngineManager:
     async def run_ocr(self, image: np.ndarray) -> dict:
         if not self._current_instance:
             logger.error("No active engine to run OCR.")
-            return {"text": "", "confidence": 0.0}
+            return self._normalize_result("", 0.0, {"warning": "no_active_engine"})
             
         try:
-            work_image = preprocess_paddle_slice(image)
-            detected_boxes = await self._current_instance.detect(work_image)
-            boxes_raw = len(detected_boxes)
+            if self._current_id == "paddle":
+                work_image = preprocess_paddle_slice(image)
+                detected_boxes = await self._current_instance.detect(work_image)
+                boxes_raw = len(detected_boxes)
 
-            primary = await self._recognize_box_groups(work_image, detected_boxes, expand_for_recognition=False)
-            final_text = (primary.get("text", "") or "").strip()
-            final_conf = float(primary.get("confidence", 0.0) or 0.0)
-            self._telemetry["frames"] += 1
-            self._telemetry["boxes_raw"] += boxes_raw
-            self._telemetry["boxes_merged"] += 0
-            self._telemetry["fallback_hits"] += 0
-            self._telemetry["ocr_chars"] += len(final_text)
-
-            return {
-                "text": final_text,
-                "confidence": final_conf,
-                "meta": {
+                primary = await self._recognize_box_groups(work_image, detected_boxes, expand_for_recognition=False)
+                final_text = (primary.get("text", "") or "").strip()
+                final_conf = float(primary.get("confidence", 0.0) or 0.0)
+                base_meta = {
                     "boxes_raw": boxes_raw,
                     "boxes_merged": 0,
                     "fallback_used": False,
                     "ocr_chars": len(final_text),
-                },
-            }
+                }
+            else:
+                rec = await self._current_instance.recognize(image)
+                final_text = (rec.get("text", "") or "").strip()
+                final_conf = float(rec.get("confidence", 0.0) or 0.0)
+                base_meta = rec.get("meta", {}) if isinstance(rec, dict) else {}
+
+            final_text, validator_meta = self._apply_validator_assist(final_text, final_conf)
+            combined_meta = dict(base_meta) if isinstance(base_meta, dict) else {}
+            combined_meta.update(validator_meta)
+            self._telemetry["frames"] += 1
+            self._telemetry["boxes_raw"] += int(combined_meta.get("boxes_raw", 0) or 0)
+            self._telemetry["boxes_merged"] += 0
+            self._telemetry["fallback_hits"] += 0
+            self._telemetry["ocr_chars"] += len(final_text)
+
+            return self._normalize_result(final_text, final_conf, combined_meta)
         except Exception as e:
             logger.error(f"Error running OCR pipeline: {e}")
-            return {"text": "", "confidence": 0.0}
+            return self._normalize_result("", 0.0, {"warning": str(e)})
+
+    def _apply_validator_assist(self, text: str, confidence: float) -> tuple[str, dict]:
+        if not text:
+            return "", {"validator": {"enabled": not _validator_disabled(), "changed": False, "valid_hint": False, "jp_chars": 0}}
+
+        if _validator_disabled():
+            return text, {"validator": {"enabled": False, "changed": False, "valid_hint": True, "jp_chars": int(score_japanese_density(text))}}
+
+        cleaned = clean_ocr_output(text)
+        out_text = cleaned if cleaned else text
+        changed = out_text != text
+        jp_chars = int(score_japanese_density(out_text))
+        valid_hint = bool(is_valid_japanese(out_text, confidence)) if out_text else False
+
+        return out_text, {
+            "validator": {
+                "enabled": True,
+                "changed": changed,
+                "valid_hint": valid_hint,
+                "jp_chars": jp_chars,
+            }
+        }
+
+    def _normalize_result(self, text: str, confidence: float, meta: dict | None = None) -> dict:
+        normalized_meta = {
+            "engine": self._current_id,
+            "boxes_raw": 0,
+            "boxes_merged": 0,
+            "fallback_used": False,
+            "ocr_chars": len(text or ""),
+        }
+        if isinstance(meta, dict):
+            normalized_meta.update(meta)
+        return {
+            "text": (text or "").strip(),
+            "confidence": float(confidence or 0.0),
+            "meta": normalized_meta,
+        }
 
     def _normalize_box(self, box: list, w: int, h: int) -> tuple[int, int, int, int] | None:
         x1 = int(math.floor(float(box[0])))
@@ -461,15 +627,16 @@ class EngineManager:
         return False
 
     async def preload_silently(self, engine_id: str):
-        if engine_id not in self._engines:
+        resolved_engine_id = self._resolve_engine_id(engine_id)
+        if resolved_engine_id not in self._engines:
             logger.error(f"Unknown engine '{engine_id}' for silent preload.")
             return
             
         async def _silent_worker():
             try:
-                await self.get_or_load_engine(engine_id)
+                await self.get_or_load_engine(resolved_engine_id)
             except Exception as e:
-                logger.warning(f"Background preload failed for '{engine_id}': {e}")
+                logger.warning(f"Background preload failed for '{resolved_engine_id}': {e}")
                 
         asyncio.create_task(_silent_worker())
 
@@ -501,4 +668,19 @@ class EngineManager:
         return self._current_id
 
     async def _load_windows_ocr(self):
-        raise NotImplementedError("Windows OCR engine is not implemented yet.")
+        reason = "windows_ocr is not implemented yet in this desktop pipeline"
+        logger.warning(reason)
+        return UnavailableEngine("windows_ocr", reason)
+
+    async def _load_easyocr(self):
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, __import__, "easyocr")
+        except Exception:
+            reason = "easyocr dependency missing; install easyocr to enable this engine"
+            logger.warning(reason)
+            return UnavailableEngine("easyocr", reason)
+
+        engine = EasyOCREngine()
+        await engine.load()
+        return engine

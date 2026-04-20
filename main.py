@@ -18,6 +18,9 @@ from core.tensor_utils import preprocess_paddle_slice
 
 def parse_args():
     parser = argparse.ArgumentParser(description="DesktopOCR console runner")
+    parser.add_argument("--engine", type=str, default="paddle", choices=["paddle", "windows_ocr", "easyocr"], help="OCR engine to use")
+    parser.add_argument("--list-engines", action="store_true", help="List available engine IDs and exit")
+    parser.add_argument("--list-engine-status", action="store_true", help="List engine IDs with readiness/dependency status and exit")
     parser.add_argument("--hwnd", type=str, help="Window handle (hex like 0x1A2B or decimal)")
     parser.add_argument("--debug-once", action="store_true", help="Run one raw OCR diagnostic pass before loop")
     parser.add_argument("--show-canvas", action="store_true", help="Show live OCR canvas with detection boxes")
@@ -75,6 +78,31 @@ def list_windows():
 async def main():
     args = parse_args()
 
+    engine_manager = EngineManager("models/paddle", {"det": "", "rec": "", "dict": ""})
+
+    if args.list_engines:
+        print("Available engines:")
+        for engine_id in engine_manager.get_supported_engines():
+            print(f"- {engine_id}")
+        return
+
+    if args.list_engine_status:
+        print("Engine status:")
+        statuses = engine_manager.get_engine_status()
+        for engine_id in engine_manager.get_supported_engines():
+            info = statuses.get(engine_id, {})
+            state = info.get("state", "unknown")
+            dependency = info.get("dependency")
+            note = info.get("note")
+            suffix_parts = []
+            if dependency:
+                suffix_parts.append(f"dependency={dependency}")
+            if note:
+                suffix_parts.append(f"note={note}")
+            suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
+            print(f"- {engine_id}: state={state}{suffix}")
+        return
+
     if args.raw_ocr:
         os.environ["DESKTOCR_RAW_OCR_MODE"] = "1"
         os.environ["DESKTOCR_DISABLE_VALIDATOR"] = "1"
@@ -122,7 +150,8 @@ async def main():
         MODEL_CONFIG["dict"],
     )
     logger.info(
-        "Runtime flags | raw_ocr=%s | light_preprocess=%s | det_no_pad=%s | web_parity=%s",
+        "Runtime flags | engine=%s | raw_ocr=%s | light_preprocess=%s | det_no_pad=%s | web_parity=%s",
+        args.engine,
         os.getenv("DESKTOCR_RAW_OCR_MODE", "0"),
         os.getenv("DESKTOCR_LIGHT_PREPROCESS", "0"),
         os.getenv("DESKTOCR_DET_NO_PAD", "0"),
@@ -170,10 +199,10 @@ async def main():
     pipeline = CapturePipeline(engine_manager, capture)
 
     try:
-        logger.info("Loading server engine...")
-        success = await engine_manager.switch_engine("server")
+        logger.info("Loading engine: %s ...", args.engine)
+        success = await engine_manager.switch_engine(args.engine)
         if not success:
-            logger.error("Failed to load server engine.")
+            logger.error("Failed to load engine: %s", args.engine)
             return
 
         if args.debug_once:
@@ -190,7 +219,7 @@ async def main():
                 )
 
                 ocr_impl = getattr(engine_manager, "_current_instance", None)
-                if ocr_impl is not None and hasattr(ocr_impl, "detect"):
+                if engine_manager.current_id == "paddle" and ocr_impl is not None and hasattr(ocr_impl, "detect"):
                     det_t0 = time.perf_counter()
                     debug_frame = preprocess_paddle_slice(frame)
                     boxes = await ocr_impl.detect(debug_frame)
@@ -228,6 +257,8 @@ async def main():
                         cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
                     cv2.imwrite(str(dbg_dir / "debug_once_overlay.png"), overlay)
                     logger.info("Debug artifacts written to: %s", dbg_dir.resolve())
+                else:
+                    logger.info("Debug detect overlay skipped (selected engine does not expose Paddle detect boxes).")
 
                 ocr_t0 = time.perf_counter()
                 raw = await engine_manager.run_ocr(frame)
@@ -252,9 +283,10 @@ async def main():
                     continue
 
                 ocr_impl = getattr(engine_manager, "_current_instance", None)
-                canvas_frame = preprocess_paddle_slice(frame)
+                is_paddle = engine_manager.current_id == "paddle"
+                canvas_frame = preprocess_paddle_slice(frame) if is_paddle else frame
                 raw_boxes = []
-                if ocr_impl is not None and hasattr(ocr_impl, "detect"):
+                if is_paddle and ocr_impl is not None and hasattr(ocr_impl, "detect"):
                     raw_boxes = await ocr_impl.detect(canvas_frame)
 
                 vis = canvas_frame.copy()
@@ -267,7 +299,7 @@ async def main():
 
                 cv2.putText(
                     vis,
-                    f"detected={len(raw_boxes)} recognized={len(raw_boxes)}",
+                    f"engine={engine_manager.current_id} detected={len(raw_boxes)}",
                     (8, 22),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -281,10 +313,19 @@ async def main():
                 res = await engine_manager.run_ocr(frame)
                 text = (res.get("text", "") or "").strip()
                 conf = float(res.get("confidence", 0.0) or 0.0)
+                meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                validator = meta.get("validator", {}) if isinstance(meta, dict) else {}
+                v_enabled = bool(validator.get("enabled", False))
+                v_changed = bool(validator.get("changed", False))
+                v_valid = bool(validator.get("valid_hint", False))
+                engine_id = meta.get("engine", engine_manager.current_id)
                 if text and text != last_shown_text:
                     last_shown_text = text
                     timestamp = datetime.now().strftime("%H:%M:%S")
-                    print(f"\n[{timestamp}] [Conf: {conf:.2f}] {text}")
+                    print(
+                        f"\n[{timestamp}] [Engine: {engine_id}] [Conf: {conf:.2f}] "
+                        f"[Val: {'on' if v_enabled else 'off'}, changed={v_changed}, ok={v_valid}] {text}"
+                    )
                 else:
                     print(".", end="", flush=True)
 
@@ -296,8 +337,17 @@ async def main():
             if res is not None:
                 text = res.get("text", "")
                 conf = res.get("confidence", 0.0)
+                meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                validator = meta.get("validator", {}) if isinstance(meta, dict) else {}
+                v_enabled = bool(validator.get("enabled", False))
+                v_changed = bool(validator.get("changed", False))
+                v_valid = bool(validator.get("valid_hint", False))
+                engine_id = meta.get("engine", engine_manager.current_id)
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                print(f"\n[{timestamp}] [Conf: {conf:.2f}] {text}")
+                print(
+                    f"\n[{timestamp}] [Engine: {engine_id}] [Conf: {conf:.2f}] "
+                    f"[Val: {'on' if v_enabled else 'off'}, changed={v_changed}, ok={v_valid}] {text}"
+                )
             else:
                 # Silently log invalid strings inline mapped natively via terminal dot increments
                 print(".", end="", flush=True)
