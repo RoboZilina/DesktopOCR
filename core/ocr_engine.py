@@ -17,6 +17,11 @@ from core.tensor_utils import (
 
 logger = logging.getLogger(__name__)
 
+DET_THRESHOLD_BASE = 0.18
+DET_THRESHOLD_NOISY = 0.28
+NOISY_COMPONENT_TRIGGER = 140
+NOISY_MIN_BOX_AREA = 40 * 40
+
 class PaddleOCR:
     def __init__(self, models_dir: str, model_config: dict):
         self.models_dir = pathlib.Path(models_dir)
@@ -128,25 +133,36 @@ class PaddleOCR:
 
             map_h, map_w = map_2d.shape
 
-            # Threshold map tuned for desktop-captured VN subtitles
-            # (BitBlt + transparency/background blending often needs higher recall)
-            threshold = 0.18
+            # Threshold map tuned for desktop-captured VN subtitles.
+            # Minimal adaptive patch: if low-threshold output is too noisy,
+            # rerun at stricter threshold for that frame only.
+            threshold = DET_THRESHOLD_BASE
             binary_map = (map_2d > threshold).astype(np.uint8)
+            num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
+            component_count = num_labels - 1
+            min_area = None
 
-            # Find connected components
-            num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
+            if component_count > NOISY_COMPONENT_TRIGGER:
+                threshold = DET_THRESHOLD_NOISY
+                binary_map = (map_2d > threshold).astype(np.uint8)
+                num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
+                min_area = NOISY_MIN_BOX_AREA
+                logger.debug(
+                    "PaddleOCR detect: noisy frame rescue triggered | components=%d -> threshold=%.2f",
+                    component_count,
+                    threshold,
+                )
 
             boxes = []
 
-            # image_to_det_tensor() letterboxes with a UNIFORM scale into 960x960 canvas
-            # (top-left aligned). To map DB-map coordinates back to original image space,
-            # use the inverse of that uniform scale, not separate x/y ratios from
-            # original dimensions (which distorts y for very wide subtitle strips).
+            # image_to_det_tensor() stretches input directly to 960x960.
+            # Map DB-map coordinates back to original image space using separate
+            # x/y scales (matching web implementation behavior).
             det_input_size = 960.0
-            uniform_scale = min(det_input_size / w_orig, det_input_size / h_orig)
-            inv_scale = 1.0 / uniform_scale if uniform_scale > 0 else 1.0
             map_to_input_x = det_input_size / map_w
             map_to_input_y = det_input_size / map_h
+            input_to_orig_x = float(w_orig) / det_input_size if det_input_size > 0 else 1.0
+            input_to_orig_y = float(h_orig) / det_input_size if det_input_size > 0 else 1.0
 
             # Skip label 0 which is background
             for label in range(1, num_labels):
@@ -165,10 +181,10 @@ class PaddleOCR:
                 p_max_x = min(map_w, max_x + PAD_RIGHT + 1)
                 p_max_y = min(map_h, max_y + PAD_BOTTOM + 1)
 
-                x1 = p_min_x * map_to_input_x * inv_scale
-                y1 = p_min_y * map_to_input_y * inv_scale
-                x2 = p_max_x * map_to_input_x * inv_scale
-                y2 = p_max_y * map_to_input_y * inv_scale
+                x1 = p_min_x * map_to_input_x * input_to_orig_x
+                y1 = p_min_y * map_to_input_y * input_to_orig_y
+                x2 = p_max_x * map_to_input_x * input_to_orig_x
+                y2 = p_max_y * map_to_input_y * input_to_orig_y
 
                 # Clamp remapped coordinates to original image bounds
                 x1 = max(0.0, min(float(w_orig), x1))
@@ -178,7 +194,10 @@ class PaddleOCR:
 
                 boxes.append([x1, y1, x2, y2])
 
-            filtered_boxes = filter_noise_boxes(boxes)
+            if min_area is None:
+                filtered_boxes = filter_noise_boxes(boxes)
+            else:
+                filtered_boxes = filter_noise_boxes(boxes, min_area=min_area)
             return filtered_boxes
         except Exception as e:
             logger.error(f"PaddleOCR detection error: {e}")

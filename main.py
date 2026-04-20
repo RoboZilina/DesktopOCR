@@ -16,6 +16,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="DesktopOCR console runner")
     parser.add_argument("--hwnd", type=str, help="Window handle (hex like 0x1A2B or decimal)")
     parser.add_argument("--debug-once", action="store_true", help="Run one raw OCR diagnostic pass before loop")
+    parser.add_argument("--models-dir", type=str, default="models/paddle", help="Directory containing OCR model files")
+    parser.add_argument("--det-model", type=str, default="PP-OCRv5_server_det_infer.onnx", help="Detection ONNX filename")
+    parser.add_argument("--rec-model", type=str, default="PP-OCRv5_server_rec_infer.onnx", help="Recognition ONNX filename")
+    parser.add_argument("--dict-file", type=str, default="japan_dict.txt", help="Dictionary filename")
     return parser.parse_args()
 
 def list_windows():
@@ -76,11 +80,19 @@ async def main():
         return
 
     MODEL_CONFIG = {
-        "det": "PP-OCRv5_server_det_infer.onnx",
-        "rec": "PP-OCRv5_server_rec_infer.onnx",
-        "dict": "japan_dict.txt",
+        "det": args.det_model,
+        "rec": args.rec_model,
+        "dict": args.dict_file,
     }
-    MODELS_DIR = "models/paddle"
+    MODELS_DIR = args.models_dir
+
+    logger.info(
+        "Model config | dir=%s | det=%s | rec=%s | dict=%s",
+        MODELS_DIR,
+        MODEL_CONFIG["det"],
+        MODEL_CONFIG["rec"],
+        MODEL_CONFIG["dict"],
+    )
 
     engine_manager = EngineManager(MODELS_DIR, MODEL_CONFIG)
     capture = ScreenCapture(hwnd)

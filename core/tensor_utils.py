@@ -17,24 +17,11 @@ MIN_BOX_AREA = 24 * 24  # balanced noise-box filter threshold (pixels²)
 def image_to_det_tensor(image: np.ndarray) -> np.ndarray:
     """
     canvasToFloat32Tensor equivalent for detection
-    Resize to 960x960 (fill background black, preserve aspect ratio)
+    Resize to 960x960 (direct stretch, matching web Paddle path)
     """
     target_h, target_w = 960, 960
-    h, w = image.shape[:2]
+    canvas = cv2.resize(image, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
     
-    # Preserve aspect ratio
-    scale = min(target_w / w, target_h / h)
-    new_w = max(1, int(round(w * scale)))
-    new_h = max(1, int(round(h * scale)))
-    
-    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-    
-    canvas = np.zeros((target_h, target_w, 3), dtype=np.uint8)
-    canvas[:new_h, :new_w] = resized
-    
-    # Convert BGR (OpenCV) -> RGB (PP-OCR preprocessing expectation)
-    canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-
     # Normalize: (pixel/255 - 0.5) / 0.5
     img_float = canvas.astype(np.float32)
     img_float = (img_float / 255.0 - 0.5) / 0.5
@@ -66,9 +53,6 @@ def image_to_rec_tensor(image: np.ndarray) -> np.ndarray:
     canvas = np.zeros((target_h, max_w, 3), dtype=np.uint8)
     canvas[:, :new_w] = resized
     
-    # Convert BGR (OpenCV) -> RGB (PP-OCR preprocessing expectation)
-    canvas = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
-
     # Normalize: same as above
     img_float = canvas.astype(np.float32)
     img_float = (img_float / 255.0 - 0.5) / 0.5
@@ -79,8 +63,9 @@ def image_to_rec_tensor(image: np.ndarray) -> np.ndarray:
     # Write into REC_BUFFER in-place
     REC_BUFFER[0] = img_chw
     
-    # Return a copy of only the filled slice
-    return REC_BUFFER[:, :, :, :new_w].copy()
+    # Keep fixed input shape (1, 3, 48, 320) with right-side black padding.
+    # Variable-width tensors can destabilize decoding for this model family.
+    return REC_BUFFER.copy()
 
 def crop_box(image: np.ndarray, box: list) -> np.ndarray | None:
     """

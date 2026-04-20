@@ -1,5 +1,7 @@
 import asyncio
+import difflib
 import logging
+import os
 from collections import Counter
 
 from core.engine_manager import EngineManager
@@ -7,6 +9,7 @@ from core.capture import ScreenCapture
 from logic.validator import is_valid_japanese, clean_ocr_output, score_japanese_density
 
 logger = logging.getLogger(__name__)
+VALIDATOR_DISABLED = os.getenv("DESKTOCR_DISABLE_VALIDATOR", "0") == "1"
 
 class CapturePipeline:
     def __init__(self, engine_manager: EngineManager, capture: ScreenCapture):
@@ -20,6 +23,14 @@ class CapturePipeline:
         
         self._auto_task = None
         self.multi_pass_enabled = False
+        self._stats = {
+            "frames": 0,
+            "boxes_raw": 0,
+            "boxes_merged": 0,
+            "fallback_hits": 0,
+            "chars_emitted": 0,
+        }
+        self._stats_log_every = 20
 
     async def capture_once(self) -> dict | None:
         """
@@ -51,10 +62,33 @@ class CapturePipeline:
                 
             text = res.get("text", "")
             conf = res.get("confidence")
+            meta = res.get("meta", {}) if isinstance(res, dict) else {}
+            self._update_stats(meta)
+
+            if VALIDATOR_DISABLED:
+                cleaned = clean_ocr_output(text)
+                if not cleaned:
+                    return None
+                if cleaned == self._last_result:
+                    return None
+                if self._is_near_duplicate(cleaned, self._last_result):
+                    return None
+                self._last_result = cleaned
+                self._stats["chars_emitted"] += len(cleaned)
+                self._maybe_log_stats()
+                return {"text": cleaned, "confidence": conf if conf is not None else 0.0}
             
             if is_valid_japanese(text, conf):
                 cleaned = clean_ocr_output(text)
+                if not cleaned:
+                    return None
+                if cleaned == self._last_result:
+                    return None
+                if self._is_near_duplicate(cleaned, self._last_result):
+                    return None
                 self._last_result = cleaned
+                self._stats["chars_emitted"] += len(cleaned)
+                self._maybe_log_stats()
                 return {"text": cleaned, "confidence": conf}
 
             if text:
@@ -63,6 +97,8 @@ class CapturePipeline:
                     f"{conf:.3f}" if isinstance(conf, (int, float)) else conf,
                     text,
                 )
+
+            self._maybe_log_stats()
                 
             return None
             
@@ -159,3 +195,39 @@ class CapturePipeline:
                 best_weighted = r
                 
         return best_weighted
+
+    def _is_near_duplicate(self, current: str, previous: str) -> bool:
+        if not current or not previous:
+            return False
+
+        if current in previous or previous in current:
+            if abs(len(current) - len(previous)) <= 2:
+                return True
+
+        ratio = difflib.SequenceMatcher(a=current, b=previous).ratio()
+        return ratio >= 0.90
+
+    def _update_stats(self, meta: dict) -> None:
+        self._stats["frames"] += 1
+        self._stats["boxes_raw"] += int(meta.get("boxes_raw", 0) or 0)
+        self._stats["boxes_merged"] += int(meta.get("boxes_merged", 0) or 0)
+        self._stats["fallback_hits"] += int(bool(meta.get("fallback_used", False)))
+
+    def _maybe_log_stats(self) -> None:
+        frames = self._stats["frames"]
+        if frames <= 0 or (frames % self._stats_log_every) != 0:
+            return
+
+        fallback_rate = self._stats["fallback_hits"] / frames
+        avg_chars = self._stats["chars_emitted"] / frames
+
+        logger.info(
+            "OCR stats | frames=%d | boxes_raw=%d | boxes_merged=%d | fallback_hits=%d | chars_emitted=%d | fallback_rate=%.2f | avg_chars=%.2f",
+            frames,
+            self._stats["boxes_raw"],
+            self._stats["boxes_merged"],
+            self._stats["fallback_hits"],
+            self._stats["chars_emitted"],
+            fallback_rate,
+            avg_chars,
+        )

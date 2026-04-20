@@ -10,27 +10,104 @@ JAPANESE_RANGES = [
 
 CONFIDENCE_THRESHOLD = 0.45
 LOW_CONF_JP_RATIO_THRESHOLD = 0.8
+ASCII_RATIO_HARD_REJECT = 0.70
+ASCII_RATIO_SOFT_LIMIT = 0.25
+
+UI_NOISE_TOKENS = {
+    "save",
+    "load",
+    "system",
+    "log",
+    "skip",
+    "auto",
+    "config",
+    "quicksave",
+    "quickload",
+    "voice",
+    "repeat",
+}
+
+
+def _ascii_letter_ratio(text: str) -> float:
+    if not text:
+        return 0.0
+    letters = sum(1 for c in text if "a" <= c.lower() <= "z")
+    return letters / len(text)
+
+
+def _contains_ui_noise_token(text: str) -> bool:
+    if not text:
+        return False
+    lowered = text.lower()
+    return any(tok in lowered for tok in UI_NOISE_TOKENS)
+
+
+def _is_symbol_heavy(text: str) -> bool:
+    if not text:
+        return True
+    non_space = [c for c in text if not c.isspace()]
+    if not non_space:
+        return True
+    symbol_count = sum(1 for c in non_space if not c.isalnum())
+    return (symbol_count / len(non_space)) >= 0.85
+
+
+def _has_kanji(text: str) -> bool:
+    return any(0x4E00 <= ord(c) <= 0x9FFF for c in text)
 
 def is_valid_japanese(text: str, confidence: float | None = None) -> bool:
     """
     Validation gate for Japanese text.
     Ported exactly from instructions.md.
     """
-    if not text or len(text) < 2:
+    if not text:
         return False
 
-    jp_ratio = score_japanese_density(text) / len(text)
-        
-    # Confidence gate (from OCR engine)
-    if confidence is not None and confidence < CONFIDENCE_THRESHOLD:
-        # Confidence values can be poorly calibrated across OCR model variants.
-        # For strong Japanese-only outputs, allow pass-through despite low confidence.
-        if jp_ratio < LOW_CONF_JP_RATIO_THRESHOLD:
-            return False
-        
-    # Japanese character ratio gate
-    # Return True only if ratio >= 0.5
-    return jp_ratio >= 0.5
+    text = text.strip()
+    if len(text) < 2:
+        return False
+
+    if _contains_ui_noise_token(text):
+        return False
+
+    jp_count = score_japanese_density(text)
+    jp_ratio = jp_count / len(text)
+    ascii_ratio = _ascii_letter_ratio(text)
+
+    if jp_count == 0:
+        return False
+
+    if _is_symbol_heavy(text) and jp_ratio < 0.5:
+        return False
+
+    if ascii_ratio >= ASCII_RATIO_HARD_REJECT and jp_ratio < 0.5:
+        return False
+
+    # Recall-first fast-path for strong Japanese fragments, even when confidence
+    # is under-calibrated for noisy VN captures.
+    if jp_ratio >= LOW_CONF_JP_RATIO_THRESHOLD and jp_count >= 2:
+        return True
+
+    # Hybrid-lite scoring for borderline lines.
+    score = 0
+    if jp_ratio >= 0.5:
+        score += 2
+    if jp_ratio >= 0.7:
+        score += 1
+    if _has_kanji(text):
+        score += 1
+    if len(text) >= 4:
+        score += 1
+
+    if ascii_ratio <= ASCII_RATIO_SOFT_LIMIT:
+        score += 1
+    elif ascii_ratio > 0.45:
+        score -= 1
+
+    if confidence is not None and confidence >= CONFIDENCE_THRESHOLD:
+        score += 1
+
+    return score >= 3
 
 def score_japanese_density(text: str) -> float:
     """
@@ -55,15 +132,23 @@ def clean_ocr_output(text: str) -> str:
     if not text:
         return ""
 
-    # 1. Strip lone Latin letters (single letters not adjacent to other letters or numbers)
+    # 1. Normalize whitespace early
+    text = text.replace("\u3000", " ")
+    text = re.sub(r"\s+", " ", text)
+
+    # 2. Strip lone Latin letters (single letters not adjacent to other letters or numbers)
     # Using negative lookbehind/lookahead to find letters not part of an alphanumeric word
     text = re.sub(r'(?i)(?<![a-z0-9])[a-z](?![a-z0-9])', '', text)
     
-    # 2. Strip repeated punctuation (3+ same punctuation chars in a row)
+    # 3. Strip repeated punctuation (3+ same punctuation chars in a row)
     # Target common OCR-noise candidates
     text = re.sub(r'([!?.。，、…\-])\1{2,}', '', text)
+
+    # 4. Normalize common punctuation variants
+    text = text.replace("，", "、").replace(",", "、")
+    text = text.replace("．", "。").replace(".", "。")
     
-    # 3. Strip leading/trailing whitespace
+    # 5. Strip leading/trailing whitespace
     return text.strip()
 
 if __name__ == "__main__":

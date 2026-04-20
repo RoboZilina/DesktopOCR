@@ -1,16 +1,31 @@
 import asyncio
 import logging
+import cv2
 import numpy as np
 
 from core.ocr_engine import PaddleOCR
-from core.tensor_utils import crop_box
+from logic.validator import score_japanese_density
 
 logger = logging.getLogger(__name__)
+
+MIN_PRIMARY_JP_CHARS = 3
+MIN_CANDIDATE_JP_RATIO = 0.30
+MIN_CANDIDATE_JP_CHARS = 3
+MAX_FALLBACK_BANDS = 2
+MIN_FALLBACK_GAIN_JP_CHARS = 2
+MIN_FALLBACK_GAIN_TEXT_CHARS = 3
 
 class EngineManager:
     def __init__(self, models_dir: str, model_config: dict):
         self.models_dir = models_dir
         self.model_config = model_config
+        self._telemetry = {
+            "frames": 0,
+            "boxes_raw": 0,
+            "boxes_merged": 0,
+            "fallback_hits": 0,
+            "ocr_chars": 0,
+        }
         
         self._engines = {
             "server": {"instance": None, "state": "not_loaded", "task": None},
@@ -89,40 +104,319 @@ class EngineManager:
             return {"text": "", "confidence": 0.0}
             
         try:
-            boxes = await self._current_instance.detect(image)
-            
-            if not boxes:
-                return {"text": "", "confidence": 0.0}
-                
-            texts = []
-            confidences = []
-            
-            for box in boxes:
-                # Direct numpy slice instead of crop_box. Boxes from detect()
-                # are already padded in detection-space before coordinate scaling.
-                x1, y1, x2, y2 = [int(round(v)) for v in box]
-                h, w = image.shape[:2]
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(w, x2), min(h, y2)
-                if (x2 - x1) < 4 or (y2 - y1) < 4:
-                    continue
-                crop = image[y1:y2, x1:x2].copy()
-                
-                res = await self._current_instance.recognize(crop)
-                text = res.get("text", "").strip()
-                conf = res.get("confidence", 0.0)
-                
-                if text:
-                    texts.append(text)
-                    confidences.append(conf)
-                        
-            final_text = "\n".join(texts)
-            avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-            
-            return {"text": final_text, "confidence": avg_conf}
+            h, w = image.shape[:2]
+            detected_boxes = await self._current_instance.detect(image)
+            boxes_raw = len(detected_boxes)
+            boxes = self._filter_boxes(detected_boxes, w, h)
+
+            merged_boxes = self._merge_horizontal_boxes(boxes, y_tol=max(6, int(h * 0.06)))
+            boxes_merged = len(merged_boxes)
+            primary = await self._recognize_box_groups(image, merged_boxes)
+
+            fallback_needed = self._should_trigger_fallback(primary, merged_boxes, w)
+            fallback = {"text": "", "confidence": 0.0}
+            if fallback_needed:
+                fallback = await self._recognize_dynamic_bands(image)
+
+            primary_scored = self._score_candidate(primary, source="primary")
+            fallback_scored = self._score_candidate(fallback, source="fallback")
+
+            winner = self._pick_best_candidate(primary_scored, fallback_scored)
+            if winner.get("source") == "fallback" and primary_scored.get("text"):
+                if not self._fallback_is_meaningfully_better(primary_scored, fallback_scored):
+                    winner = primary_scored
+
+            if winner.get("source") == "fallback" and winner.get("text"):
+                logger.info(
+                    "OCR fallback won over primary | primary=%r | fallback=%r",
+                    primary_scored.get("text", ""),
+                    fallback_scored.get("text", ""),
+                )
+
+            final_text = winner.get("text", "")
+            self._telemetry["frames"] += 1
+            self._telemetry["boxes_raw"] += boxes_raw
+            self._telemetry["boxes_merged"] += boxes_merged
+            self._telemetry["fallback_hits"] += int(fallback_needed)
+            self._telemetry["ocr_chars"] += len(final_text)
+
+            return {
+                "text": final_text,
+                "confidence": float(winner.get("confidence", 0.0) or 0.0),
+                "meta": {
+                    "boxes_raw": boxes_raw,
+                    "boxes_merged": boxes_merged,
+                    "fallback_used": fallback_needed,
+                    "ocr_chars": len(final_text),
+                },
+            }
         except Exception as e:
             logger.error(f"Error running OCR pipeline: {e}")
             return {"text": "", "confidence": 0.0}
+
+    def _normalize_box(self, box: list, w: int, h: int) -> tuple[int, int, int, int] | None:
+        x1, y1, x2, y2 = [int(round(v)) for v in box]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if (x2 - x1) < 4 or (y2 - y1) < 4:
+            return None
+        return x1, y1, x2, y2
+
+    def _filter_boxes(self, boxes: list, w: int, h: int) -> list[list[int]]:
+        if not boxes:
+            return []
+
+        min_w = max(8, int(w * 0.015))
+        min_h = max(8, int(h * 0.05))
+        min_area = max(80, int(w * h * 0.00015))
+
+        out: list[list[int]] = []
+        for b in boxes:
+            norm = self._normalize_box(b, w, h)
+            if norm is None:
+                continue
+            x1, y1, x2, y2 = norm
+            bw = x2 - x1
+            bh = y2 - y1
+            area = bw * bh
+            if bw < min_w or bh < min_h or area < min_area:
+                continue
+            aspect = bw / bh if bh > 0 else 0.0
+            if aspect < 0.5 or aspect > 45.0:
+                continue
+            out.append([x1, y1, x2, y2])
+
+        return out
+
+    def _merge_horizontal_boxes(self, boxes: list, y_tol: int) -> list[list[int]]:
+        if not boxes:
+            return []
+
+        sorted_boxes = sorted(boxes, key=lambda b: (float(b[1] + b[3]) * 0.5, float(b[0])))
+        groups: list[list[list[float]]] = []
+
+        for box in sorted_boxes:
+            cy = (float(box[1]) + float(box[3])) * 0.5
+            placed = False
+            for group in groups:
+                g_cy = sum((float(b[1]) + float(b[3])) * 0.5 for b in group) / len(group)
+                if abs(cy - g_cy) <= y_tol:
+                    group.append(box)
+                    placed = True
+                    break
+            if not placed:
+                groups.append([box])
+
+        merged: list[list[int]] = []
+        for group in groups:
+            x1 = min(float(b[0]) for b in group)
+            y1 = min(float(b[1]) for b in group)
+            x2 = max(float(b[2]) for b in group)
+            y2 = max(float(b[3]) for b in group)
+            merged.append([int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))])
+
+        merged.sort(key=lambda b: (b[1], b[0]))
+        return merged
+
+    async def _recognize_box_groups(self, image: np.ndarray, boxes: list[list[int]]) -> dict:
+        if not boxes:
+            return {"text": "", "confidence": 0.0}
+
+        h, w = image.shape[:2]
+        texts: list[str] = []
+        confidences: list[float] = []
+
+        for box in boxes:
+            norm = self._normalize_box(box, w, h)
+            if norm is None:
+                continue
+            x1, y1, x2, y2 = norm
+            crop = image[y1:y2, x1:x2].copy()
+            res = await self._current_instance.recognize(crop)
+            text = res.get("text", "").strip()
+            conf = float(res.get("confidence", 0.0) or 0.0)
+            if text:
+                texts.append(text)
+                confidences.append(conf)
+
+        final_text = "\n".join(texts)
+        avg_conf = float(sum(confidences) / len(confidences)) if confidences else 0.0
+        return {"text": final_text, "confidence": avg_conf}
+
+    def _should_trigger_fallback(self, primary: dict, merged_boxes: list[list[int]], frame_w: int) -> bool:
+        text = (primary.get("text", "") or "").strip()
+        jp_chars = score_japanese_density(text)
+
+        if not merged_boxes:
+            return True
+        if len(merged_boxes) > 8:
+            return True
+        if jp_chars < MIN_PRIMARY_JP_CHARS:
+            return True
+
+        widest = max((b[2] - b[0]) for b in merged_boxes)
+        if widest < int(frame_w * 0.35):
+            return True
+
+        for b in merged_boxes:
+            bw = b[2] - b[0]
+            bh = b[3] - b[1]
+            if bh <= 0:
+                continue
+            aspect = bw / bh
+            if aspect > 40.0 or aspect < 1.0:
+                return True
+
+        return False
+
+    def _extract_dynamic_bands(self, image: np.ndarray) -> list[tuple[int, int]]:
+        h, _w = image.shape[:2]
+        if h < 8:
+            return []
+
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+        energy = np.abs(grad_x).sum(axis=1)
+        energy = cv2.GaussianBlur(energy.reshape(-1, 1), (1, 9), 0).reshape(-1)
+
+        thresh = float(np.mean(energy) + 0.45 * np.std(energy))
+        active = energy > thresh
+
+        bands: list[tuple[int, int, float]] = []
+        start = None
+        for i, val in enumerate(active):
+            if val and start is None:
+                start = i
+            elif not val and start is not None:
+                end = i - 1
+                if (end - start + 1) >= 8:
+                    band_score = float(np.sum(energy[start:end + 1]))
+                    bands.append((start, end, band_score))
+                start = None
+        if start is not None:
+            end = len(active) - 1
+            if (end - start + 1) >= 8:
+                band_score = float(np.sum(energy[start:end + 1]))
+                bands.append((start, end, band_score))
+
+        if not bands:
+            return []
+
+        bands.sort(key=lambda x: x[2], reverse=True)
+        top = bands[:MAX_FALLBACK_BANDS]
+        top_sorted = sorted(top, key=lambda x: x[0])
+
+        out: list[tuple[int, int]] = []
+        for y1, y2, _score in top_sorted:
+            margin = 6
+            yy1 = max(0, y1 - margin)
+            yy2 = min(h, y2 + 1 + margin)
+            if yy2 - yy1 >= 8:
+                out.append((yy1, yy2))
+        return out
+
+    async def _recognize_dynamic_bands(self, image: np.ndarray) -> dict:
+        bands = self._extract_dynamic_bands(image)
+        if not bands:
+            return {"text": "", "confidence": 0.0}
+
+        texts: list[str] = []
+        confidences: list[float] = []
+        for y1, y2 in bands:
+            crop = image[y1:y2, :].copy()
+            bh, bw = crop.shape[:2]
+
+            band_detected = await self._current_instance.detect(crop)
+            band_boxes = self._filter_boxes(band_detected, bw, bh)
+            band_merged = self._merge_horizontal_boxes(band_boxes, y_tol=max(4, int(bh * 0.18)))
+            detected_res = await self._recognize_box_groups(crop, band_merged)
+
+            full_res = await self._current_instance.recognize(crop)
+            best_band = self._pick_best_candidate(
+                self._score_candidate(detected_res, source="band_detect"),
+                self._score_candidate(full_res, source="band_full"),
+            )
+            text = best_band.get("text", "").strip()
+            conf = float(best_band.get("confidence", 0.0) or 0.0)
+            if text:
+                texts.append(text)
+                confidences.append(conf)
+
+        final_text = "\n".join(texts)
+        avg_conf = float(sum(confidences) / len(confidences)) if confidences else 0.0
+        return {"text": final_text, "confidence": avg_conf}
+
+    def _score_candidate(self, candidate: dict, source: str) -> dict:
+        text = (candidate.get("text", "") or "").strip()
+        conf = float(candidate.get("confidence", 0.0) or 0.0)
+        if not text:
+            return {
+                "source": source,
+                "text": "",
+                "confidence": conf,
+                "jp_chars": 0,
+                "jp_ratio": 0.0,
+                "eligible": False,
+            }
+
+        jp_chars = int(score_japanese_density(text))
+        jp_ratio = float(jp_chars / len(text)) if len(text) > 0 else 0.0
+        eligible = jp_ratio >= MIN_CANDIDATE_JP_RATIO and jp_chars >= MIN_CANDIDATE_JP_CHARS
+
+        return {
+            "source": source,
+            "text": text,
+            "confidence": conf,
+            "jp_chars": jp_chars,
+            "jp_ratio": jp_ratio,
+            "eligible": eligible,
+        }
+
+    def _pick_best_candidate(self, primary: dict, fallback: dict) -> dict:
+        candidates = [primary, fallback]
+        eligible = [c for c in candidates if c.get("eligible") and c.get("text")]
+
+        def _score(c: dict) -> tuple:
+            return (
+                len(c.get("text", "")),
+                int(c.get("jp_chars", 0)),
+                float(c.get("jp_ratio", 0.0)),
+            )
+
+        if eligible:
+            return max(eligible, key=_score)
+
+        with_text = [c for c in candidates if c.get("text")]
+        if with_text:
+            return max(with_text, key=_score)
+
+        return {
+            "source": "none",
+            "text": "",
+            "confidence": 0.0,
+            "jp_chars": 0,
+            "jp_ratio": 0.0,
+            "eligible": False,
+        }
+
+    def _fallback_is_meaningfully_better(self, primary: dict, fallback: dict) -> bool:
+        if not fallback.get("text"):
+            return False
+        if not primary.get("text"):
+            return True
+
+        p_jp = int(primary.get("jp_chars", 0))
+        f_jp = int(fallback.get("jp_chars", 0))
+        p_len = len(primary.get("text", ""))
+        f_len = len(fallback.get("text", ""))
+        p_ratio = float(primary.get("jp_ratio", 0.0))
+        f_ratio = float(fallback.get("jp_ratio", 0.0))
+
+        if f_jp >= (p_jp + MIN_FALLBACK_GAIN_JP_CHARS):
+            return True
+        if f_len >= (p_len + MIN_FALLBACK_GAIN_TEXT_CHARS) and f_ratio >= p_ratio:
+            return True
+        return False
 
     async def preload_silently(self, engine_id: str):
         if engine_id not in self._engines:
