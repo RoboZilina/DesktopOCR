@@ -1,9 +1,12 @@
 import asyncio
 import logging
+import os
+import math
 import cv2
 import numpy as np
 
 from core.ocr_engine import PaddleOCR
+from core.tensor_utils import PAD_LEFT, PAD_RIGHT, PAD_TOP, PAD_BOTTOM, preprocess_paddle_slice
 from logic.validator import score_japanese_density
 
 logger = logging.getLogger(__name__)
@@ -14,6 +17,14 @@ MIN_CANDIDATE_JP_CHARS = 3
 MAX_FALLBACK_BANDS = 2
 MIN_FALLBACK_GAIN_JP_CHARS = 2
 MIN_FALLBACK_GAIN_TEXT_CHARS = 3
+
+
+def _web_parity_mode_enabled() -> bool:
+    return os.getenv("DESKTOCR_WEB_PARITY_MODE", "0") == "1"
+
+
+def _raw_ocr_mode_enabled() -> bool:
+    return os.getenv("DESKTOCR_RAW_OCR_MODE", "0") == "1"
 
 class EngineManager:
     def __init__(self, models_dir: str, model_config: dict):
@@ -104,49 +115,26 @@ class EngineManager:
             return {"text": "", "confidence": 0.0}
             
         try:
-            h, w = image.shape[:2]
-            detected_boxes = await self._current_instance.detect(image)
+            work_image = preprocess_paddle_slice(image)
+            detected_boxes = await self._current_instance.detect(work_image)
             boxes_raw = len(detected_boxes)
-            boxes = self._filter_boxes(detected_boxes, w, h)
 
-            merged_boxes = self._merge_horizontal_boxes(boxes, y_tol=max(6, int(h * 0.06)))
-            boxes_merged = len(merged_boxes)
-            primary = await self._recognize_box_groups(image, merged_boxes)
-
-            fallback_needed = self._should_trigger_fallback(primary, merged_boxes, w)
-            fallback = {"text": "", "confidence": 0.0}
-            if fallback_needed:
-                fallback = await self._recognize_dynamic_bands(image)
-
-            primary_scored = self._score_candidate(primary, source="primary")
-            fallback_scored = self._score_candidate(fallback, source="fallback")
-
-            winner = self._pick_best_candidate(primary_scored, fallback_scored)
-            if winner.get("source") == "fallback" and primary_scored.get("text"):
-                if not self._fallback_is_meaningfully_better(primary_scored, fallback_scored):
-                    winner = primary_scored
-
-            if winner.get("source") == "fallback" and winner.get("text"):
-                logger.info(
-                    "OCR fallback won over primary | primary=%r | fallback=%r",
-                    primary_scored.get("text", ""),
-                    fallback_scored.get("text", ""),
-                )
-
-            final_text = winner.get("text", "")
+            primary = await self._recognize_box_groups(work_image, detected_boxes, expand_for_recognition=False)
+            final_text = (primary.get("text", "") or "").strip()
+            final_conf = float(primary.get("confidence", 0.0) or 0.0)
             self._telemetry["frames"] += 1
             self._telemetry["boxes_raw"] += boxes_raw
-            self._telemetry["boxes_merged"] += boxes_merged
-            self._telemetry["fallback_hits"] += int(fallback_needed)
+            self._telemetry["boxes_merged"] += 0
+            self._telemetry["fallback_hits"] += 0
             self._telemetry["ocr_chars"] += len(final_text)
 
             return {
                 "text": final_text,
-                "confidence": float(winner.get("confidence", 0.0) or 0.0),
+                "confidence": final_conf,
                 "meta": {
                     "boxes_raw": boxes_raw,
-                    "boxes_merged": boxes_merged,
-                    "fallback_used": fallback_needed,
+                    "boxes_merged": 0,
+                    "fallback_used": False,
                     "ocr_chars": len(final_text),
                 },
             }
@@ -155,12 +143,37 @@ class EngineManager:
             return {"text": "", "confidence": 0.0}
 
     def _normalize_box(self, box: list, w: int, h: int) -> tuple[int, int, int, int] | None:
-        x1, y1, x2, y2 = [int(round(v)) for v in box]
+        x1 = int(math.floor(float(box[0])))
+        y1 = int(math.floor(float(box[1])))
+        x2 = int(math.ceil(float(box[2])))
+        y2 = int(math.ceil(float(box[3])))
         x1, y1 = max(0, x1), max(0, y1)
         x2, y2 = min(w, x2), min(h, y2)
         if (x2 - x1) < 4 or (y2 - y1) < 4:
             return None
         return x1, y1, x2, y2
+
+    def _expand_box_for_recognition(self, box: tuple[int, int, int, int], w: int, h: int) -> tuple[int, int, int, int] | None:
+        x1, y1, x2, y2 = box
+        bw = x2 - x1
+        bh = y2 - y1
+        if bw < 4 or bh < 4:
+            return None
+
+        # Keep web-style asymmetry while adding modest size-aware margin.
+        pad_l = max(PAD_LEFT // 2, int(round(bw * 0.03)))
+        pad_r = max(PAD_RIGHT // 2, int(round(bw * 0.02)))
+        pad_t = max(PAD_TOP, int(round(bh * 0.18)))
+        pad_b = max(PAD_BOTTOM, int(round(bh * 0.18)))
+
+        ex1 = max(0, x1 - pad_l)
+        ey1 = max(0, y1 - pad_t)
+        ex2 = min(w, x2 + pad_r)
+        ey2 = min(h, y2 + pad_b)
+
+        if (ex2 - ex1) < 4 or (ey2 - ey1) < 4:
+            return None
+        return ex1, ey1, ex2, ey2
 
     def _filter_boxes(self, boxes: list, w: int, h: int) -> list[list[int]]:
         if not boxes:
@@ -218,7 +231,7 @@ class EngineManager:
         merged.sort(key=lambda b: (b[1], b[0]))
         return merged
 
-    async def _recognize_box_groups(self, image: np.ndarray, boxes: list[list[int]]) -> dict:
+    async def _recognize_box_groups(self, image: np.ndarray, boxes: list[list[int]], expand_for_recognition: bool = True) -> dict:
         if not boxes:
             return {"text": "", "confidence": 0.0}
 
@@ -227,11 +240,40 @@ class EngineManager:
         confidences: list[float] = []
 
         for box in boxes:
-            norm = self._normalize_box(box, w, h)
-            if norm is None:
-                continue
-            x1, y1, x2, y2 = norm
-            crop = image[y1:y2, x1:x2].copy()
+            if expand_for_recognition:
+                norm = self._normalize_box(box, w, h)
+                if norm is None:
+                    continue
+                expanded = self._expand_box_for_recognition(norm, w, h)
+                if expanded is None:
+                    continue
+                x1, y1, x2, y2 = expanded
+                crop = image[y1:y2, x1:x2].copy()
+            else:
+                # Web parity crop semantics (Canvas drawImage-style):
+                # keep float box coords, round width/height, then sample.
+                x1 = max(0.0, min(float(w), float(box[0])))
+                y1 = max(0.0, min(float(h), float(box[1])))
+                x2 = max(0.0, min(float(w), float(box[2])))
+                y2 = max(0.0, min(float(h), float(box[3])))
+                bw = x2 - x1
+                bh = y2 - y1
+                if bw <= 0.0 or bh <= 0.0:
+                    continue
+
+                src_w = max(1, int(round(bw)))
+                src_h = max(1, int(round(bh)))
+                dst_w = max(4, int(round(bw)))
+                dst_h = max(4, int(round(bh)))
+
+                cx = x1 + (src_w * 0.5)
+                cy = y1 + (src_h * 0.5)
+                crop = cv2.getRectSubPix(image, (src_w, src_h), (cx, cy))
+                if crop is None or crop.size == 0:
+                    continue
+                if dst_w != src_w or dst_h != src_h:
+                    crop = cv2.resize(crop, (dst_w, dst_h), interpolation=cv2.INTER_LINEAR)
+
             res = await self._current_instance.recognize(crop)
             text = res.get("text", "").strip()
             conf = float(res.get("confidence", 0.0) or 0.0)

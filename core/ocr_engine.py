@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import pathlib
+import os
 import numpy as np
 import onnxruntime as ort
 import cv2
@@ -17,16 +18,19 @@ from core.tensor_utils import (
 
 logger = logging.getLogger(__name__)
 
-DET_THRESHOLD_BASE = 0.18
-DET_THRESHOLD_NOISY = 0.28
-NOISY_COMPONENT_TRIGGER = 140
-NOISY_MIN_BOX_AREA = 40 * 40
+DET_THRESHOLD_BASE = 0.60
+DET_MIN_BOX_AREA = 40 * 40
+
+
+def _det_no_pad_enabled() -> bool:
+    return os.getenv("DESKTOCR_DET_NO_PAD", "0") == "1"
 
 class PaddleOCR:
     def __init__(self, models_dir: str, model_config: dict):
         self.models_dir = pathlib.Path(models_dir)
         self.model_config = model_config
-        self.providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        self.det_providers = ["DmlExecutionProvider", "CPUExecutionProvider"]
+        self.rec_providers = ["CPUExecutionProvider", "DmlExecutionProvider"]
 
         self.det_session = None
         self.rec_session = None
@@ -59,13 +63,13 @@ class PaddleOCR:
                 det_path = str(self.models_dir / self.model_config["det"])
                 logger.info(f"Initializing detection session with {det_path}...")
                 self.det_session = await loop.run_in_executor(
-                    None, lambda: ort.InferenceSession(det_path, providers=self.providers)
+                    None, lambda: ort.InferenceSession(det_path, providers=self.det_providers)
                 )
 
                 rec_path = str(self.models_dir / self.model_config["rec"])
                 logger.info(f"Initializing recognition session with {rec_path}...")
                 self.rec_session = await loop.run_in_executor(
-                    None, lambda: ort.InferenceSession(rec_path, providers=self.providers)
+                    None, lambda: ort.InferenceSession(rec_path, providers=self.rec_providers)
                 )
 
                 logger.info("Warming up models...")
@@ -133,25 +137,9 @@ class PaddleOCR:
 
             map_h, map_w = map_2d.shape
 
-            # Threshold map tuned for desktop-captured VN subtitles.
-            # Minimal adaptive patch: if low-threshold output is too noisy,
-            # rerun at stricter threshold for that frame only.
             threshold = DET_THRESHOLD_BASE
             binary_map = (map_2d > threshold).astype(np.uint8)
             num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
-            component_count = num_labels - 1
-            min_area = None
-
-            if component_count > NOISY_COMPONENT_TRIGGER:
-                threshold = DET_THRESHOLD_NOISY
-                binary_map = (map_2d > threshold).astype(np.uint8)
-                num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
-                min_area = NOISY_MIN_BOX_AREA
-                logger.debug(
-                    "PaddleOCR detect: noisy frame rescue triggered | components=%d -> threshold=%.2f",
-                    component_count,
-                    threshold,
-                )
 
             boxes = []
 
@@ -176,10 +164,21 @@ class PaddleOCR:
                 max_x = x + w - 1
                 max_y = y + h - 1
 
-                p_min_x = max(0, min_x - PAD_LEFT)
-                p_min_y = max(0, min_y - PAD_TOP)
-                p_max_x = min(map_w, max_x + PAD_RIGHT + 1)
-                p_max_y = min(map_h, max_y + PAD_BOTTOM + 1)
+                if _det_no_pad_enabled():
+                    pad_left = 0
+                    pad_right = 0
+                    pad_top = 0
+                    pad_bottom = 0
+                else:
+                    pad_left = PAD_LEFT
+                    pad_right = PAD_RIGHT
+                    pad_top = PAD_TOP
+                    pad_bottom = PAD_BOTTOM
+
+                p_min_x = max(0, min_x - pad_left)
+                p_min_y = max(0, min_y - pad_top)
+                p_max_x = min(map_w, max_x + pad_right + 1)
+                p_max_y = min(map_h, max_y + pad_bottom + 1)
 
                 x1 = p_min_x * map_to_input_x * input_to_orig_x
                 y1 = p_min_y * map_to_input_y * input_to_orig_y
@@ -194,10 +193,7 @@ class PaddleOCR:
 
                 boxes.append([x1, y1, x2, y2])
 
-            if min_area is None:
-                filtered_boxes = filter_noise_boxes(boxes)
-            else:
-                filtered_boxes = filter_noise_boxes(boxes, min_area=min_area)
+            filtered_boxes = filter_noise_boxes(boxes, min_area=DET_MIN_BOX_AREA)
             return filtered_boxes
         except Exception as e:
             logger.error(f"PaddleOCR detection error: {e}")
@@ -205,10 +201,6 @@ class PaddleOCR:
 
     async def recognize(self, crop: np.ndarray) -> dict:
         if self.rec_session is None:
-            return {"text": "", "confidence": 0.0}
-
-        if self._busy_lock.locked():
-            logger.warning("PaddleOCR: Inference skipped — session is busy.")
             return {"text": "", "confidence": 0.0}
 
         async with self._busy_lock:

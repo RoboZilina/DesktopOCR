@@ -12,15 +12,59 @@ PAD_RIGHT = 12
 PAD_TOP = 12
 PAD_BOTTOM = 12
 
-MIN_BOX_AREA = 24 * 24  # balanced noise-box filter threshold (pixels²)
+MIN_BOX_AREA = 40 * 40
+
+
+def trim_empty_vertical(image: np.ndarray) -> np.ndarray:
+    if image is None or image.size == 0:
+        return image
+    # Web parity: trimEmptyVertical() removes only fully transparent rows.
+    # Desktop frames are typically opaque BGR, so this is intentionally a no-op.
+    if len(image.shape) < 3 or image.shape[2] < 4:
+        return image
+
+    alpha = image[:, :, 3]
+    non_empty_rows = np.where(np.any(alpha != 0, axis=1))[0]
+    if non_empty_rows.size == 0:
+        return image
+
+    top = int(non_empty_rows[0])
+    bottom = int(non_empty_rows[-1]) + 1
+    if bottom <= top:
+        return image
+    return image[top:bottom, :]
+
+
+def pad_left(image: np.ndarray, px: int = 4) -> np.ndarray:
+    if image is None or image.size == 0 or px <= 0:
+        return image
+    h, w = image.shape[:2]
+    out = np.zeros((h, w + px, 3), dtype=np.uint8)
+    out[:, px:] = image
+    return out
+
+
+def boost_contrast(image: np.ndarray, alpha: float = 1.08) -> np.ndarray:
+    if image is None or image.size == 0:
+        return image
+    return cv2.convertScaleAbs(image, alpha=alpha, beta=0)
+
+
+def preprocess_paddle_slice(image: np.ndarray) -> np.ndarray:
+    if image is None or image.size == 0:
+        return image
+    trimmed = trim_empty_vertical(image)
+    padded = pad_left(trimmed, px=4)
+    return boost_contrast(padded, alpha=1.08)
 
 def image_to_det_tensor(image: np.ndarray) -> np.ndarray:
     """
     canvasToFloat32Tensor equivalent for detection
     Resize to 960x960 (direct stretch, matching web Paddle path)
     """
+    source = image
     target_h, target_w = 960, 960
-    canvas = cv2.resize(image, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+    canvas = cv2.resize(source, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
     
     # Normalize: (pixel/255 - 0.5) / 0.5
     img_float = canvas.astype(np.float32)
@@ -40,15 +84,16 @@ def image_to_rec_tensor(image: np.ndarray) -> np.ndarray:
     canvasToFloat32Tensor equivalent for recognition
     Preserve aspect ratio, max width/height
     """
+    source = image
     target_h = 48
     max_w = 320
-    h, w = image.shape[:2]
+    h, w = source.shape[:2]
     
     # Scale to height=48 EXACTLY, preserve aspect ratio for width
     scale = target_h / h
     new_w = min(max_w, max(1, int(round(w * scale))))
     
-    resized = cv2.resize(image, (new_w, target_h), interpolation=cv2.INTER_LINEAR)
+    resized = cv2.resize(source, (new_w, target_h), interpolation=cv2.INTER_LINEAR)
     
     canvas = np.zeros((target_h, max_w, 3), dtype=np.uint8)
     canvas[:, :new_w] = resized
