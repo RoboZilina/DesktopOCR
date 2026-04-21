@@ -75,14 +75,27 @@ def _create_d3d11_device() -> object:
     if hr != 0:
         raise RuntimeError(f"D3D11CreateDevice failed: HRESULT=0x{hr & 0xFFFFFFFF:08X}")
 
-    # winsdk 0.10.0 — interop helper wraps the raw ID3D11Device pointer directly.
-    # No manual QueryInterface for IDXGIDevice is required; the helper handles
-    # the QI and the IDirect3DDevice wrapping internally.
-    from winsdk.windows.graphics.directx.direct3d11.interop import (  # noqa: PLC0415
-        create_direct3d11_device_from_dxgi_device,
+    # winsdk 1.0.0b10 removed the python interop helper module
+    # winsdk.windows.graphics.directx.direct3d11.interop.
+    # Bridge manually via Win32 API and wrap with IDirect3DDevice._from.
+    # This keeps compatibility with both the existing capture pipeline and
+    # current installable winsdk builds.
+    create_from_dxgi = d3d11.CreateDirect3D11DeviceFromDXGIDevice
+    create_from_dxgi.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p)]
+    create_from_dxgi.restype = ctypes.c_long
+
+    inspectable = ctypes.c_void_p()
+    hr = create_from_dxgi(p_device, ctypes.byref(inspectable))
+    if hr != 0:
+        raise RuntimeError(
+            f"CreateDirect3D11DeviceFromDXGIDevice failed: HRESULT=0x{hr & 0xFFFFFFFF:08X}"
+        )
+
+    from winsdk.windows.graphics.directx.direct3d11 import (  # noqa: PLC0415
+        IDirect3DDevice,
     )
-    d3d_device = create_direct3d11_device_from_dxgi_device(p_device)
-    return d3d_device
+
+    return IDirect3DDevice._from(inspectable.value)
 
 
 def _iid_to_bytes(iid_str: str) -> list[int]:
@@ -354,6 +367,17 @@ class ScreenCapture:
         """Acquire one frame from the WinRT frame pool and return it as BGR ndarray."""
         if not await self._ensure_session():
             return None
+
+        if self._use_bitblt:
+            return await self._get_frame_bitblt()
+
+        if self._frame_pool is None:
+            log.warning(
+                "WinRT frame pool not available for HWND=0x%X — switching to BitBlt fallback",
+                self._hwnd,
+            )
+            self._use_bitblt = True
+            return await self._get_frame_bitblt()
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[Optional[np.ndarray]] = loop.create_future()
