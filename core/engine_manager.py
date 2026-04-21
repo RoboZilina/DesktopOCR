@@ -6,7 +6,14 @@ import cv2
 import numpy as np
 
 from core.ocr_engine import PaddleOCR
-from core.tensor_utils import PAD_LEFT, PAD_RIGHT, PAD_TOP, PAD_BOTTOM, preprocess_paddle_slice
+from core.tensor_utils import (
+    PAD_LEFT,
+    PAD_RIGHT,
+    PAD_TOP,
+    PAD_BOTTOM,
+    preprocess_paddle_slice,
+    preprocess_natural_slice,
+)
 from logic.validator import clean_ocr_output, is_valid_japanese, score_japanese_density
 
 logger = logging.getLogger(__name__)
@@ -251,7 +258,8 @@ class EngineManager:
                     "ocr_chars": len(final_text),
                 }
             else:
-                rec = await self._current_instance.recognize(image)
+                work_image = preprocess_natural_slice(image)
+                rec = await self._current_instance.recognize(work_image)
                 final_text = (rec.get("text", "") or "").strip()
                 final_conf = float(rec.get("confidence", 0.0) or 0.0)
                 base_meta = rec.get("meta", {}) if isinstance(rec, dict) else {}

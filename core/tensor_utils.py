@@ -57,6 +57,24 @@ def preprocess_paddle_slice(image: np.ndarray) -> np.ndarray:
     padded = pad_left(trimmed, px=4)
     return boost_contrast(padded, alpha=1.08)
 
+
+def preprocess_natural_slice(image: np.ndarray) -> np.ndarray:
+    if image is None or image.size == 0:
+        return image
+
+    if len(image.shape) == 2:
+        gray = image
+    elif len(image.shape) == 3 and image.shape[2] == 1:
+        gray = image[:, :, 0]
+    elif len(image.shape) == 3 and image.shape[2] == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    elif len(image.shape) == 3 and image.shape[2] == 4:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+    else:
+        return image
+
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+
 def image_to_det_tensor(image: np.ndarray) -> np.ndarray:
     """
     canvasToFloat32Tensor equivalent for detection
