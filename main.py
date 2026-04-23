@@ -6,7 +6,9 @@ import logging
 import math
 import os
 import pathlib
+import sys
 import time
+from collections import deque
 from datetime import datetime
 import cv2
 
@@ -75,7 +77,14 @@ def list_windows():
         print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {title}")
     print("-----------------------")
 
-async def main():
+async def main(
+    hwnd: int,
+    gui_mode: bool = False,
+    frame_queue=None,
+    status_bar=None,
+    preview=None,
+    window=None,
+):
     args = parse_args()
 
     engine_manager = EngineManager("models/paddle", {"det": "", "rec": "", "dict": ""})
@@ -115,25 +124,6 @@ async def main():
     logger = logging.getLogger(__name__)
 
     list_windows()
-
-    if args.hwnd:
-        user_input = args.hwnd.strip()
-    else:
-        print("\nRun tests/test_capture.py first to find your game HWND if unsure.")
-        user_input = input("Enter HWND (hex like 0x1A2B or decimal): ").strip()
-    
-    if not user_input:
-        print("No HWND provided. Exiting.")
-        return
-
-    try:
-        if user_input.lower().startswith("0x"):
-            hwnd = int(user_input, 16)
-        else:
-            hwnd = int(user_input)
-    except ValueError:
-        logger.error("Invalid HWND value '%s'. Use decimal or hex like 0x1A2B.", user_input)
-        return
 
     MODEL_CONFIG = {
         "det": args.det_model,
@@ -176,12 +166,12 @@ async def main():
             return
     elif args.select_region:
         logger.info("Interactive region selection enabled. Capturing preview frame...")
-        preview = await capture.get_frame()
-        if preview is None:
+        preview_frame = await capture.get_frame()
+        if preview_frame is None:
             logger.error("Failed to capture preview frame for region selection.")
             return
 
-        x, y, w, h = cv2.selectROI("Select OCR Region", preview, showCrosshair=True, fromCenter=False)
+        x, y, w, h = cv2.selectROI("Select OCR Region", preview_frame, showCrosshair=True, fromCenter=False)
         cv2.destroyWindow("Select OCR Region")
         if w <= 0 or h <= 0:
             logger.error("Region selection canceled or invalid (w/h <= 0).")
@@ -274,6 +264,53 @@ async def main():
 
         logger.info("Engine ready. Starting capture loop (Ctrl+C to stop)...")
         last_shown_text = ""
+
+        # ---- GUI mode capture loop --------------------------------
+        if gui_mode:
+            from PyQt6.QtWidgets import QApplication
+
+            logger.info("Starting GUI capture loop...")
+
+            # CloseEvent handler: flag the loop to stop when window is closed
+            # TODO(Stage 4): replace with qasync shutdown
+            _gui_running = True
+            def _on_close():
+                nonlocal _gui_running
+                _gui_running = False
+            window.closeEvent = lambda e: (_on_close(), e.accept())
+
+            while _gui_running:
+                frame = await capture.get_frame()
+                if frame is not None:
+                    # Push frame into deque for preview widget
+                    frame_queue.append(frame.copy())
+
+                    # Run OCR
+                    res = await pipeline.capture_once()
+                    if res is not None:
+                        text = res.get("text", "")
+                        conf = res.get("confidence", 0.0)
+                        meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                        engine_id = meta.get("engine", engine_manager.current_id)
+                        status_bar.set_engine(engine_id)
+                        status_bar.set_confidence(float(conf))
+                        if text:
+                            status_bar.set_window_title(text[:60])
+                        timestamp = datetime.now().strftime("%H:%M:%S")
+                        print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
+
+                # Pump Qt events -- critical for preview responsiveness
+                # Placed BEFORE sleep to prevent 1.5s UI freeze
+                QApplication.processEvents()
+
+                await asyncio.sleep(1.5)
+
+            # Cleanup on window close
+            preview.stop()
+            window.close()
+            logger.info("GUI window closed. Stopping capture.")
+            return
+
         while True:
             if args.show_canvas:
                 frame = await capture.get_frame()
@@ -365,8 +402,87 @@ async def main():
         await engine_manager.dispose_all()
         print("Stopped.")
 
-if __name__ == "__main__":
+def _resolve_hwnd_from_arg(value: str, logger: logging.Logger) -> int | None:
+    """Parse hex (0x...) or decimal HWND string. Returns None on failure."""
+    user_input = value.strip()
+    if not user_input:
+        logger.error("Empty HWND value.")
+        return None
     try:
-        asyncio.run(main())
+        # int(val, 0) auto-detects base: 0x prefix → hex, otherwise decimal
+        return int(user_input, 0)
+    except ValueError:
+        logger.error("Invalid HWND value '%s'. Use decimal or hex like 0x1A2B.", user_input)
+        return None
+
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    # Early-exit flags that don't need a HWND
+    if args.list_engines or args.list_engine_status:
+        asyncio.run(main(0))  # hwnd unused for listing
+        sys.exit(0)
+
+    # Determine mode: GUI mode when --hwnd is NOT provided
+    gui_mode = args.hwnd is None
+
+    # QApplication is always needed for the picker dialog (and preview in GUI mode)
+    from PyQt6.QtWidgets import QApplication
+    app = QApplication.instance() or QApplication(sys.argv)
+
+    # Resolve HWND: --hwnd flag or GUI picker dialog
+    hwnd: int | None = None
+    if args.hwnd:
+        hwnd = _resolve_hwnd_from_arg(args.hwnd, logging.getLogger(__name__))
+    else:
+        from PyQt6.QtWidgets import QDialog
+        from ui.window_picker import WindowPickerDialog
+        dialog = WindowPickerDialog()
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            hwnd = dialog.selected_hwnd
+
+    if hwnd is None:
+        sys.exit("No window selected. Use --hwnd or run without it to open the picker.")
+
+    # GUI mode: create preview window before starting capture
+    if gui_mode:
+        from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget as QCentralWidget
+        from ui.preview_widget import PreviewWidget
+        from ui.components import StatusBar
+
+        window = QMainWindow()
+        window.setWindowTitle(f"DesktopOCR \u2014 {hex(hwnd)}")
+        window.setMinimumSize(640, 480)
+
+        central = QCentralWidget()
+        window.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+
+        frame_queue: deque = deque(maxlen=1)
+        preview = PreviewWidget(frame_queue)
+        layout.addWidget(preview)
+
+        status_bar = StatusBar()
+        layout.addWidget(status_bar)
+
+        window.show()
+    else:
+        frame_queue = None
+        preview = None
+        status_bar = None
+        window = None
+
+    try:
+        asyncio.run(
+            main(
+                hwnd,
+                gui_mode=gui_mode,
+                frame_queue=frame_queue,
+                status_bar=status_bar,
+                preview=preview,
+                window=window,
+            )
+        )
     except KeyboardInterrupt:
         pass
