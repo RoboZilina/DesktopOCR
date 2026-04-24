@@ -689,6 +689,7 @@ if __name__ == "__main__":
         window = QMainWindow()
         window.setWindowTitle(f"Personal OCR \u2014 {hex(hwnd)}")
         window.setMinimumSize(960, 640)
+        window.resize(1440, 960)
         window.setStyleSheet("background: transparent;")
 
         central = QWidget()
