@@ -74,7 +74,8 @@ def list_windows():
     
     print("--- Visible Windows ---")
     for hwnd, title in windows:
-        print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {title}")
+        safe_title = title.encode(sys.stdout.encoding, errors="replace").decode(sys.stdout.encoding)
+        print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {safe_title}")
     print("-----------------------")
 
 async def main(
@@ -279,10 +280,24 @@ async def main(
                 _gui_running = False
             window.closeEvent = lambda e: (_on_close(), e.accept())
 
+            # Connect overlay selection to capture region updates
+            def _on_region_changed(nx, ny, nw, nh):
+                imgW, imgH = preview.frame_size
+                if imgW == 0 or imgH == 0:
+                    return
+                x = int(nx * imgW)
+                y = int(ny * imgH)
+                w = int(nw * imgW)
+                h = int(nh * imgH)
+                capture.set_region(x, y, w, h)
+                logger.info("Region selected: x=%d y=%d w=%d h=%d", x, y, w, h)
+
+            preview.selection_overlay.region_changed.connect(_on_region_changed)
+
             while _gui_running:
-                frame = await capture.get_frame()
+                frame = await capture.get_frame(full=True)
                 if frame is not None:
-                    # Push frame into deque for preview widget
+                    # Push full window frame into deque for preview widget
                     frame_queue.append(frame.copy())
 
                     # Run OCR
@@ -461,7 +476,7 @@ if __name__ == "__main__":
 
         frame_queue: deque = deque(maxlen=1)
         preview = PreviewWidget(frame_queue)
-        layout.addWidget(preview)
+        layout.addWidget(preview, stretch=1)
 
         status_bar = StatusBar()
         layout.addWidget(status_bar)

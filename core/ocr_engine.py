@@ -242,8 +242,21 @@ class PaddleOCR:
 
                 for t in range(time_steps):
                     timestep_logits = logits[b, t, :]
-                    exp_logits = np.exp(timestep_logits - np.max(timestep_logits))
-                    probs = exp_logits / exp_logits.sum()
+                    # Detect if model outputs probabilities (sum≈1, all in [0,1])
+                    # or log-softmax (all negative, exp sum≈1) vs raw logits.
+                    raw_sum = float(np.sum(timestep_logits))
+                    raw_min = float(np.min(timestep_logits))
+                    raw_max = float(np.max(timestep_logits))
+                    if raw_max <= 1.0 and raw_min >= 0.0 and abs(raw_sum - 1.0) < 0.1:
+                        # Already probabilities
+                        probs = timestep_logits
+                    elif raw_max < 0.0 and abs(np.sum(np.exp(timestep_logits)) - 1.0) < 0.1:
+                        # Log-softmax: convert to probabilities
+                        probs = np.exp(timestep_logits)
+                    else:
+                        # Raw logits: apply softmax
+                        exp_logits = np.exp(timestep_logits - np.max(timestep_logits))
+                        probs = exp_logits / exp_logits.sum()
                     max_idx = int(np.argmax(probs))
                     max_val = float(probs[max_idx])
                     
@@ -266,7 +279,7 @@ class PaddleOCR:
                 else:
                     conf = float(np.mean(max_probs)) if max_probs else 0.0
                 avg_confidences.append(conf)
-
+                logger.debug("CTC decode | chars=%d char_probs=%d conf=%.4f text=%r", len(chars), len(char_probs), conf, texts[-1][:20])
             return {"text": texts[0] if texts else "", "confidence": avg_confidences[0] if avg_confidences else 0.0}
         except Exception as e:
             logger.error(f"PaddleOCR CTC Decoding Error: {e}")

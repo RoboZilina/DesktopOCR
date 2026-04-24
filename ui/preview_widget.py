@@ -7,9 +7,11 @@ Receives numpy BGR frames via a deque and renders them as QPixmap.
 import cv2
 import numpy as np
 from collections import deque
-from PyQt6.QtWidgets import QLabel, QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QLabel, QWidget, QVBoxLayout, QSizePolicy
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
+
+from ui.selection_overlay import SelectionOverlay
 
 
 class PreviewWidget(QWidget):
@@ -31,18 +33,53 @@ class PreviewWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        self.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
+
         self._label = QLabel("No feed")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._label.setStyleSheet(
             "background-color: #1e1e1e; color: #888; font-size: 16px;"
         )
         self._label.setMinimumSize(320, 180)
+        self._label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         layout.addWidget(self._label)
+
+        # Overlay for click-and-drag region selection
+        self._overlay = SelectionOverlay(self._get_frame_size, self)
+        self._overlay.setGeometry(self._label.geometry())
+        self._overlay.raise_()  # ensure overlay is painted on top
 
         # Timer: poll deque at 50ms (~20 fps)
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._poll_frame)
         self._timer.start(50)
+
+    def _get_frame_size(self):
+        """Return (width, height) of the last rendered frame, or (0, 0)."""
+        if self._last_frame is not None:
+            h, w = self._last_frame.shape[:2]
+            return w, h
+        return 0, 0
+
+    @property
+    def frame_size(self):
+        """Return (width, height) of the last rendered frame, or (0, 0)."""
+        return self._get_frame_size()
+
+    @property
+    def selection_overlay(self):
+        return self._overlay
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_overlay") and hasattr(self, "_label"):
+            self._overlay.setGeometry(self._label.geometry())
 
     def _poll_frame(self):
         """Pop the latest frame from the deque and update display."""

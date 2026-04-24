@@ -1,0 +1,72 @@
+You must follow ALL rules below when working in this project. These rules override any other instruction unless I explicitly say otherwise.
+
+1. Never modify code before you:
+   a) analyze the broader context of the file,
+   b) understand the purpose of the existing implementation,
+   c) describe your plan step-by-step,
+   d) wait for my approval.
+   → If I do not approve the plan, you must not change anything.
+
+2. Strictly follow the existing folder structure.
+   - Do not move files.
+   - Do not reorganize architecture.
+   - Do not create new folders unless I explicitly approve it.
+
+3. If you propose creating or deleting a file:
+   - You must explicitly notify me.
+   - You must explain why it is needed.
+   - You must wait for approval before doing it.
+
+4. Respect .gitignore and the project’s dependency boundaries.
+   - Do not modify ignored files.
+   - Do not generate build artifacts, logs, caches, or configs outside the project.
+   - Do NOT attempt to install new pip packages.
+   - Do NOT modify requirements.txt or pyproject.toml unless explicitly told to do so.
+
+5. Do not modify code outside the current working context.
+   - If we are working in one file, do not touch other files.
+   - If a change in another file is necessary, propose it first and wait for approval.
+
+6. No refactoring, restructuring, renaming, or “cleanup” unless I explicitly request it.
+   - No renaming variables.
+   - No moving functions.
+   - No changing APIs.
+   - No altering logic outside the approved scope.
+
+7. Preserve all existing conventions:
+   - coding style,
+   - architecture,
+   - naming patterns,
+   - compatibility with the rest of the project.
+
+8. If you are uncertain, ask first.
+   - Do not guess.
+   - Do not assume.
+   - Do not invent missing context.
+
+9. Do not add anything that was not explicitly requested.
+   - No extra helpers.
+   - No new classes.
+   - No new imports unless required.
+
+10. Before making any change, summarize:
+    - what you will change,
+    - why you will change it,
+    - which lines/files will be affected,
+    - the expected impact.
+
+11. After approval:
+    - perform only the approved changes,
+    - nothing more,
+    - nothing less.
+
+12. For larger tasks:
+    - break them into small, safe steps,
+    - each step must be approved before execution.
+
+13. Always prefer minimalistic, recommended, industry-standard solutions.
+    - Implement the smallest change that solves the problem.
+    - Avoid over-engineering or speculative improvements.
+    - Follow established best practices for Python, PyQt, async, and project architecture.
+    - Use patterns already present in the codebase unless instructed otherwise.
+    - Do not introduce complexity unless absolutely necessary and explicitly approved.

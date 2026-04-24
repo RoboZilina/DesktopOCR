@@ -247,9 +247,13 @@ class ScreenCapture:
         self._region = (int(x), int(y), int(width), int(height))
         log.debug("Capture region set: x=%d y=%d w=%d h=%d", x, y, width, height)
 
-    async def get_frame(self) -> Optional[np.ndarray]:
+    async def get_frame(self, full: bool = False) -> Optional[np.ndarray]:
         """
-        Capture one frame, run frame-diff check, crop to region, return BGR ndarray.
+        Capture one frame, run frame-diff check, optionally crop to region, return BGR ndarray.
+
+        Args:
+            full: If True, return the entire window frame without region cropping.
+                  Diff check still applies. OCR pipeline uses full=False (cropped).
 
         Returns None if:
           - The frame is identical to the last captured frame (MD5 match)
@@ -262,8 +266,8 @@ class ScreenCapture:
 
         try:
             if self._use_bitblt:
-                return await self._get_frame_bitblt()
-            return await self._get_frame_winrt()
+                return await self._get_frame_bitblt(full=full)
+            return await self._get_frame_winrt(full=full)
         except Exception as exc:
             log.error("get_frame error: %s", exc, exc_info=True)
             return None
@@ -363,13 +367,13 @@ class ScreenCapture:
     # WinRT frame acquisition
     # ------------------------------------------------------------------
 
-    async def _get_frame_winrt(self) -> Optional[np.ndarray]:
+    async def _get_frame_winrt(self, full: bool = False) -> Optional[np.ndarray]:
         """Acquire one frame from the WinRT frame pool and return it as BGR ndarray."""
         if not await self._ensure_session():
             return None
 
         if self._use_bitblt:
-            return await self._get_frame_bitblt()
+            return await self._get_frame_bitblt(full=full)
 
         if self._frame_pool is None:
             log.warning(
@@ -377,7 +381,7 @@ class ScreenCapture:
                 self._hwnd,
             )
             self._use_bitblt = True
-            return await self._get_frame_bitblt()
+            return await self._get_frame_bitblt(full=full)
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[Optional[np.ndarray]] = loop.create_future()
@@ -422,7 +426,7 @@ class ScreenCapture:
         if raw_frame is None:
             return None
 
-        return self._apply_diff_and_crop(raw_frame)
+        return self._apply_diff_and_crop(raw_frame, full=full)
 
     def _frame_to_numpy(self, frame) -> Optional[np.ndarray]:
         """
@@ -487,22 +491,22 @@ class ScreenCapture:
     # BitBlt fallback
     # ------------------------------------------------------------------
 
-    async def _get_frame_bitblt(self) -> Optional[np.ndarray]:
+    async def _get_frame_bitblt(self, full: bool = False) -> Optional[np.ndarray]:
         """Run _capture_bitblt in a thread-pool executor (blocking GDI call)."""
         loop = asyncio.get_running_loop()
         raw_frame = await loop.run_in_executor(None, _capture_bitblt, self._hwnd)
         if raw_frame is None:
             return None
-        return self._apply_diff_and_crop(raw_frame)
+        return self._apply_diff_and_crop(raw_frame, full=full)
 
     # ------------------------------------------------------------------
     # Shared post-processing: diff check + region crop
     # ------------------------------------------------------------------
 
-    def _apply_diff_and_crop(self, frame: np.ndarray) -> Optional[np.ndarray]:
+    def _apply_diff_and_crop(self, frame: np.ndarray, full: bool = False) -> Optional[np.ndarray]:
         """
         1. MD5 frame diff check — return None if frame is unchanged.
-        2. Crop to self._region if set.
+        2. Crop to self._region if set and full=False.
         3. Update self.last_frame_hash with the new hash.
 
         The hash is computed on the full (uncropped) frame to detect motion
@@ -514,8 +518,8 @@ class ScreenCapture:
             return None   # identical frame — skip
         self.last_frame_hash = new_hash
 
-        # Sub-region crop
-        if self._region is not None:
+        # Sub-region crop (skip when full=True for preview)
+        if not full and self._region is not None:
             rx, ry, rw, rh = self._region
             h, w = frame.shape[:2]
             # Clamp to frame bounds
