@@ -73,6 +73,7 @@ class TranscriptionTray(QWidget):
         sel_header.addWidget(sel_label)
         sel_header.addStretch()
 
+
         self._speak_btn = QPushButton("🔊")
         self._speak_btn.setFixedSize(28, 28)
         self._speak_btn.setToolTip("Speak selected text")
@@ -84,7 +85,6 @@ class TranscriptionTray(QWidget):
             lambda: self.tts_requested.emit(self._sel_text.toPlainText())
         )
         sel_header.addWidget(self._speak_btn)
-
         self._translate_btn = QPushButton("🌐 Translate")
         self._translate_btn.setFixedHeight(28)
         self._translate_btn.setStyleSheet(
@@ -142,14 +142,21 @@ class TranscriptionTray(QWidget):
         text = pal.text if pal else "#ffffff"
         border = pal.border if pal else "#1f1f23"
         return f"""
-            QTextEdit {{
-                background: {bg};
-                color: {text};
-                border: 1px solid {border};
-                border-radius: 6px;
-                font-size: {size};
-                padding: 6px;
-            }}
+            "QPushButton#recap-btn:hover {{ background: rgba(0,0,0,0.4); }}"
+            "QPushButton#speak-btn {{"
+            "background: #1a1a1f; color: #10b981;"
+            "border: 1px solid #2a2a2f; border-radius: 6px;"
+            "font-size: 14px;"
+            "}}"
+            "QPushButton#speak-btn:hover {{ background: #10b981; color: #1a1a1f; }}"
+            "QTextEdit {{"
+                "background: {bg};"
+                "color: {text};"
+                "border: 1px solid {border};"
+                "border-radius: 6px;"
+                "font-size: {size};"
+                "padding: 6px;"
+            "}}"
         """
 
     def _on_selection_changed(self):

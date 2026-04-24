@@ -2,10 +2,9 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSlider, QFrame,
+    QPushButton, QSlider, QFrame, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPalette, QColor
 from ui.theme import ThemePalette, DARK, LIGHT
 
 
@@ -29,12 +28,13 @@ class SideMenu(QWidget):
         super().__init__(parent)
         self.setFixedWidth(340)
         self.setObjectName("SideMenu")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
 
         # Main layout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(10)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(12)
 
         # Header
         self._header = QLabel("SIDE MENU")
@@ -47,8 +47,9 @@ class SideMenu(QWidget):
         self._theme_btns = {}
         for label, tid in [("Auto", "auto"), ("Dark", "dark"), ("Light", "light")]:
             btn = QPushButton(label)
-            btn.setProperty("class", "option-btn")
+            btn.setProperty("menuClass", "option-btn")
             btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _checked, t=tid: self._on_theme_clicked(t))
             theme_row.addWidget(btn)
             self._theme_btns[tid] = btn
@@ -95,8 +96,9 @@ class SideMenu(QWidget):
         self._size_btns = {}
         for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
             btn = QPushButton(label)
-            btn.setProperty("class", "option-btn")
+            btn.setProperty("menuClass", "option-btn")
             btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _checked, s=sid: self._on_text_size_clicked(s))
             size_row.addWidget(btn)
             self._size_btns[sid] = btn
@@ -110,8 +112,9 @@ class SideMenu(QWidget):
         self._tray_size_btns = {}
         for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
             btn = QPushButton(label)
-            btn.setProperty("class", "option-btn")
+            btn.setProperty("menuClass", "option-btn")
             btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             btn.clicked.connect(lambda _checked, s=sid: self._on_tray_height_clicked(s))
             tray_row.addWidget(btn)
             self._tray_size_btns[sid] = btn
@@ -122,18 +125,16 @@ class SideMenu(QWidget):
         # Action buttons
         layout.addWidget(self._divider())
         unload_btn = QPushButton("Unload Engines")
+        unload_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         unload_btn.clicked.connect(self.unload_engines_requested)
         layout.addWidget(unload_btn)
 
         self._reset_btn = QPushButton("Reset to Defaults")
+        self._reset_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._reset_btn.clicked.connect(self._on_reset)
         layout.addWidget(self._reset_btn)
 
         layout.addStretch()
-
-        # Auto-close menu after any button interaction
-        for btn in self.findChildren(QPushButton):
-            btn.clicked.connect(self.hide_requested)
 
         # Apply initial stylesheet
         self._apply_base_style()
@@ -149,29 +150,48 @@ class SideMenu(QWidget):
         btn_hover = "#3a3a3f" if (not pal or pal.is_dark) else "#94a3b8"
         groove = "#2a2a2f" if (not pal or pal.is_dark) else "#e2e8f0"
         checked_fg = "#000000" if (not pal or pal.is_dark) else "#ffffff"
-        palette = self.palette()
-        palette.setColor(QPalette.ColorRole.Window, QColor(bg))
-        self.setPalette(palette)
+        hover_bg = "rgba(255,255,255,0.05)" if (not pal or pal.is_dark) else "rgba(0,0,0,0.05)"
         self.setStyleSheet(
-            f"background-color: {bg}; border-right: 1px solid {border};"
+            f"""
+            #SideMenu {{
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 {bg}, stop:1 {border});
+                border-right: 1px solid {border};
+            }}
+            """ if (pal and pal.is_dark) else f"""
+            #SideMenu {{
+                background: {bg};
+                border-right: 1px solid {border};
+            }}
+            """
             + f"""
-            QLabel {{ color: {text_dim}; font-size: 14px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px; }}
-            QPushButton[class="option-btn"] {{
+            QLabel {{ color: {text_dim}; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 10px; margin-bottom: 4px; }}
+            QLabel[class="section-header"] {{
+                color: {text_dim};
+                font-size: 13px;
+                font-weight: 700;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-top: 10px;
+                margin-bottom: 4px;
+            }}
+            QPushButton[menuClass="option-btn"] {{
                 background: {btn_bg};
                 color: {text_dim};
                 border: 1px solid {btn_border};
-                border-radius: 8px;
-                padding: 7px 16px;
+                border-radius: 10px;
+                padding: 8px 18px;
                 font-size: 15px;
                 font-weight: 600;
             }}
-            QPushButton[class="option-btn"]:checked {{
+            QPushButton[menuClass="option-btn"]:checked {{
                 background: {accent};
                 color: {checked_fg};
                 border-color: {accent};
             }}
-            QPushButton[class="option-btn"]:hover {{
+            QPushButton[menuClass="option-btn"]:hover {{
                 border-color: {btn_hover};
+                background: {hover_bg};
             }}
             QSlider::groove:horizontal {{
                 background: {groove};
@@ -203,7 +223,7 @@ class SideMenu(QWidget):
         line.setFrameShape(QFrame.Shape.HLine)
         pal = getattr(self, '_pal', None)
         border = pal.border if pal else "#1f1f23"
-        line.setStyleSheet(f"background: {border}; max-height: 1px;")
+        line.setStyleSheet(f"background: {border}; max-height: 1px; margin-top: 12px; margin-bottom: 12px; opacity: 0.5;")
         return line
 
     def _on_theme_clicked(self, theme_id: str):
@@ -246,8 +266,10 @@ class SideMenu(QWidget):
         row = QHBoxLayout()
         on_btn = QPushButton("On")
         off_btn = QPushButton("Off")
-        on_btn.setProperty("class", "option-btn")
-        off_btn.setProperty("class", "option-btn")
+        on_btn.setProperty("menuClass", "option-btn")
+        off_btn.setProperty("menuClass", "option-btn")
+        on_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        off_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         on_btn.setCheckable(True)
         off_btn.setCheckable(True)
         on_btn.setChecked(default)

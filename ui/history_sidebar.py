@@ -52,8 +52,9 @@ class HistoryCard(QWidget):
             ("📋", "Copy",      self.copy_requested),
         ]:
             btn = QPushButton(icon)
-            btn.setFixedSize(28, 28)
+            btn.setFixedSize(32, 32)
             btn.setToolTip(tip)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_row.addWidget(btn)
             btn.clicked.connect(lambda _, s=signal: s.emit(self._text))
 
@@ -66,6 +67,8 @@ class HistoryCard(QWidget):
         p = self._pal
         hover_bg = "rgba(255,255,255,0.03)" if p.is_dark else "rgba(0,0,0,0.03)"
         btn_hover = "rgba(255,255,255,0.1)" if p.is_dark else "rgba(0,0,0,0.1)"
+        btn_bg = "#1a1a1f" if p.is_dark else "#f1f5f9"
+        btn_border = "#2a2a2f" if p.is_dark else "#cbd5e1"
         self.setStyleSheet(f"""
             QWidget {{
                 background: {p.panel};
@@ -78,13 +81,14 @@ class HistoryCard(QWidget):
                 border-color: {p.accent};
             }}
             QPushButton {{
-                background: none;
-                border: none;
+                background: {btn_bg};
+                border: 1px solid {btn_border};
                 font-size: 14px;
-                border-radius: 4px;
+                border-radius: 6px;
             }}
             QPushButton:hover {{
                 background: {btn_hover};
+                border-color: {p.accent};
             }}
         """)
         self._meta.setStyleSheet(f"color: {p.text_secondary}; font-size: 10px; border: none;")

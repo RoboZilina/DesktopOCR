@@ -13,6 +13,9 @@ from datetime import datetime
 import cv2
 import numpy as np
 
+from tts.manager import TTSManager
+from tts.voicevox_backend import VoiceVoxBackend
+
 DIFF_THRESHOLD = 8.0
 PREVIEW_INTERVAL = 0.25
 STABILIZE_DELAY = 0.5
@@ -40,6 +43,7 @@ from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
 from core.capture_pipeline import CapturePipeline
 from core.tensor_utils import preprocess_paddle_slice
+
 
 
 def parse_args():
@@ -276,16 +280,11 @@ async def main(
             controls.menu_requested.connect(_toggle_menu)
             side_menu.hide_requested.connect(_toggle_menu)
 
-            # Stub TTS / Translate handlers — print to terminal for now
-            def _on_tts_requested(text: str):
-                print(f"[TTS stub] {text}")
-
+            # Stub translate handler — print to terminal for now
             def _on_translate_requested(text: str):
                 print(f"[Translate stub] {text}")
 
-            tray.tts_requested.connect(_on_tts_requested)
             tray.translate_requested.connect(_on_translate_requested)
-            sidebar.tts_requested.connect(_on_tts_requested)
             sidebar.translate_requested.connect(_on_translate_requested)
 
         if args.debug_once:
@@ -453,6 +452,18 @@ async def main(
             )
             # Wire re-capture button in tray to force immediate OCR
             tray.recapture_requested.connect(lambda: ocr_trigger.set())
+
+            # TTS manager (VoiceVox placeholder — pyttsx3 removed)
+            tts = TTSManager([
+                VoiceVoxBackend(),
+            ])
+            tray.tts_requested.connect(tts.speak)
+            sidebar.tts_requested.connect(tts.speak)
+
+            # Populate voice selector from TTS backend
+            voices = tts.list_voices()
+            controls.load_voices(voices)
+            controls.voice_changed.connect(lambda vid: tts.set_voice(vid))
 
             ocr_trigger = asyncio.Event()
             ref_frame: np.ndarray | None = None

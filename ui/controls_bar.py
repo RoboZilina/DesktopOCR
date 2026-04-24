@@ -28,6 +28,7 @@ def _combo_style(pal: ThemePalette) -> str:
 class ControlsBar(QWidget):
     engine_changed = pyqtSignal(str)
     menu_requested = pyqtSignal()
+    voice_changed = pyqtSignal(str)
 
     def __init__(self, engines: list[str], parent=None):
         super().__init__(parent)
@@ -79,6 +80,20 @@ class ControlsBar(QWidget):
         self._mode_combo.setStyleSheet(_combo_style(DARK))
         layout.addWidget(self._mode_combo)
 
+        layout.addSpacing(12)
+
+        # Voice selector
+        self._voice_lbl = QLabel("Voice")
+        self._voice_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold;")
+        layout.addWidget(self._voice_lbl)
+        self.voice_selector = QComboBox()
+        self.voice_selector.setObjectName("VoiceSelector")
+        self.voice_selector.setMinimumWidth(180)
+        self.voice_selector.setMaximumWidth(260)
+        self.voice_selector.setStyleSheet(_combo_style(DARK))
+        self.voice_selector.currentTextChanged.connect(self._emit_voice_change)
+        layout.addWidget(self.voice_selector)
+
         layout.addStretch()
 
     def set_engine(self, engine_id: str):
@@ -89,12 +104,29 @@ class ControlsBar(QWidget):
             self._engine_combo.setCurrentIndex(idx)
         self._engine_combo.blockSignals(False)
 
+
+    def load_voices(self, voices):
+        """
+        Populate the voice selector with a list of (label, id) tuples.
+        Example: [("System Voice — Default (ID 0)", 0)]
+        """
+        self.voice_selector.clear()
+        self._voice_id_map = {}
+        for label, vid in voices:
+            self.voice_selector.addItem(label)
+            self._voice_id_map[label] = vid
+
+    def _emit_voice_change(self, text):
+        if hasattr(self, "_voice_id_map") and text in self._voice_id_map:
+            self.voice_changed.emit(self._voice_id_map[text])
+
     def set_theme(self, pal: ThemePalette):
         self.setStyleSheet(
             f"background: {pal.panel}; border-bottom: 1px solid {pal.border};"
         )
         self._engine_combo.setStyleSheet(_combo_style(pal))
         self._mode_combo.setStyleSheet(_combo_style(pal))
+        self.voice_selector.setStyleSheet(_combo_style(pal))
         brand = self.findChild(QLabel, "PersonalOCR")
         if brand:
             brand.setStyleSheet(
@@ -109,3 +141,7 @@ class ControlsBar(QWidget):
         self._mode_lbl.setStyleSheet(
             f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold;"
         )
+        self._voice_lbl.setStyleSheet(
+            f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold;"
+        )
+        self.voice_selector.setStyleSheet(_combo_style(pal))
