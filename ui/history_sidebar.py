@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QScrollArea, QFrame,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from ui.theme import ThemePalette, DARK
 
 
 class HistoryCard(QWidget):
@@ -17,41 +18,29 @@ class HistoryCard(QWidget):
     copy_requested      = pyqtSignal(str)
 
     def __init__(self, timestamp: str, engine: str,
-                 conf: float, text: str, parent=None):
+                 conf: float, text: str, pal: ThemePalette, parent=None):
         super().__init__(parent)
         self._text = text
-        self.setStyleSheet("""
-            QWidget {
-                background: #0d0d10;
-                border: 1px solid #1f1f23;
-                border-left: 3px solid #10b981;
-                border-radius: 6px;
-            }
-            QWidget:hover {
-                background: rgba(255,255,255,0.03);
-                border-color: #10b981;
-            }
-        """)
+        self._pal = pal
+        self._timestamp = timestamp
+        self._engine = engine
+        self._conf = conf
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 8, 10, 8)
         layout.setSpacing(4)
 
         # Metadata row
-        meta = QLabel(f"{timestamp} · {engine} · {conf:.2f}")
-        meta.setStyleSheet("color: #52525b; font-size: 10px; border: none;")
-        layout.addWidget(meta)
+        self._meta = QLabel(f"{timestamp} · {engine} · {conf:.2f}")
+        layout.addWidget(self._meta)
 
         # Text
-        text_label = QLabel(text)
-        text_label.setWordWrap(True)
-        text_label.setTextInteractionFlags(
+        self._text_label = QLabel(text)
+        self._text_label.setWordWrap(True)
+        self._text_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
-        text_label.setStyleSheet(
-            "color: #a1a1aa; font-size: 13px; border: none;"
-        )
-        layout.addWidget(text_label)
+        layout.addWidget(self._text_label)
 
         # Action buttons row (always visible, subtle)
         btn_row = QHBoxLayout()
@@ -65,22 +54,45 @@ class HistoryCard(QWidget):
             btn = QPushButton(icon)
             btn.setFixedSize(28, 28)
             btn.setToolTip(tip)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background: none;
-                    border: none;
-                    font-size: 14px;
-                    border-radius: 4px;
-                }
-                QPushButton:hover {
-                    background: rgba(255,255,255,0.1);
-                }
-            """)
-            btn.clicked.connect(lambda _, s=signal: s.emit(self._text))
             btn_row.addWidget(btn)
+            btn.clicked.connect(lambda _, s=signal: s.emit(self._text))
 
         btn_row.addStretch()
         layout.addLayout(btn_row)
+
+        self._apply_pal()
+
+    def _apply_pal(self):
+        p = self._pal
+        hover_bg = "rgba(255,255,255,0.03)" if p.is_dark else "rgba(0,0,0,0.03)"
+        btn_hover = "rgba(255,255,255,0.1)" if p.is_dark else "rgba(0,0,0,0.1)"
+        self.setStyleSheet(f"""
+            QWidget {{
+                background: {p.panel};
+                border: 1px solid {p.border};
+                border-left: 3px solid {p.accent};
+                border-radius: 6px;
+            }}
+            QWidget:hover {{
+                background: {hover_bg};
+                border-color: {p.accent};
+            }}
+            QPushButton {{
+                background: none;
+                border: none;
+                font-size: 14px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background: {btn_hover};
+            }}
+        """)
+        self._meta.setStyleSheet(f"color: {p.text_secondary}; font-size: 10px; border: none;")
+        self._text_label.setStyleSheet(f"color: {p.text_dim}; font-size: 13px; border: none;")
+
+    def set_palette(self, pal: ThemePalette):
+        self._pal = pal
+        self._apply_pal()
 
 
 class HistorySidebar(QWidget):
@@ -92,19 +104,19 @@ class HistorySidebar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedWidth(340)
-        self.setStyleSheet("background: #08080a;")
+        self._pal = None  # set via set_theme before use
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
         # Header
-        header = QWidget()
-        header.setFixedHeight(48)
-        header.setStyleSheet(
-            "background: #08080a; border-bottom: 1px solid #1f1f23;"
+        self._header = QWidget()
+        self._header.setFixedHeight(48)
+        self._header.setStyleSheet(
+            "background: transparent; border-bottom: 1px solid transparent;"
         )
-        h_layout = QHBoxLayout(header)
+        h_layout = QHBoxLayout(self._header)
         h_layout.setContentsMargins(16, 0, 16, 0)
         title = QLabel("HISTORY")
         title.setStyleSheet(
@@ -122,7 +134,7 @@ class HistorySidebar(QWidget):
         )
         clear_btn.clicked.connect(self._clear)
         h_layout.addWidget(clear_btn)
-        outer.addWidget(header)
+        outer.addWidget(self._header)
 
         # Scroll area
         self._scroll = QScrollArea()
@@ -131,11 +143,11 @@ class HistorySidebar(QWidget):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         self._scroll.setStyleSheet(
-            "QScrollArea { border: none; background: #08080a; }"
+            "QScrollArea { border: none; background: transparent; }"
         )
 
         self._container = QWidget()
-        self._container.setStyleSheet("background: #08080a;")
+        self._container.setStyleSheet("background: transparent;")
         self._cards_layout = QVBoxLayout(self._container)
         self._cards_layout.setContentsMargins(12, 12, 12, 12)
         self._cards_layout.setSpacing(8)
@@ -147,13 +159,44 @@ class HistorySidebar(QWidget):
         self._last_text: str | None = None
         self._entry_count = 0
 
+    def set_theme(self, pal: ThemePalette):
+        self._pal = pal
+        # Update own styles
+        self.setStyleSheet(f"background: {pal.bg};")
+        self._header.setStyleSheet(
+            f"background: {pal.panel}; border-bottom: 1px solid {pal.border};"
+        )
+        self._container.setStyleSheet(f"background: {pal.bg};")
+        self._scroll.setStyleSheet(
+            f"QScrollArea {{ border: none; background: {pal.bg}; }}"
+        )
+        # Update header and clear button styles via finding widgets
+        for w in self.findChildren(QWidget):
+            if isinstance(w, QPushButton) and w.text() == "Clear":
+                w.setStyleSheet(
+                    f"color: {pal.text_dim}; background: none; "
+                    f"border: 1px solid {pal.border}; border-radius: 4px;"
+                )
+        # Update title label
+        for lbl in self.findChildren(QLabel):
+            if lbl.text() == "HISTORY":
+                lbl.setStyleSheet(
+                    f"color: {pal.text_dim}; font-size: 12px; "
+                    f"font-weight: bold; letter-spacing: 1px;"
+                )
+        # Update all existing cards
+        for i in range(self._cards_layout.count() - 1):  # skip stretch
+            item = self._cards_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), HistoryCard):
+                item.widget().set_palette(pal)
+
     def add_entry(self, timestamp: str, engine: str,
                   conf: float, text: str):
         if text == self._last_text:
             return
         self._last_text = text
 
-        card = HistoryCard(timestamp, engine, conf, text)
+        card = HistoryCard(timestamp, engine, conf, text, self._pal or DARK)
         card.tts_requested.connect(self.tts_requested)
         card.translate_requested.connect(self.translate_requested)
         card.copy_requested.connect(self._copy_text)

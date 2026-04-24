@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
 
 from ui.selection_overlay import SelectionOverlay
+from ui.theme import ThemePalette, DARK
 
 
 class PreviewWidget(QWidget):
@@ -40,9 +41,8 @@ class PreviewWidget(QWidget):
 
         self._label = QLabel("No feed")
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._label.setStyleSheet(
-            "background-color: #1e1e1e; color: #888; font-size: 16px;"
-        )
+        self._pal = None
+        self._update_label_style()
         self._label.setMinimumSize(320, 180)
         self._label.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -122,6 +122,18 @@ class PreviewWidget(QWidget):
     @property
     def latest_frame(self) -> np.ndarray | None:
         return self._last_frame
+
+    def set_theme(self, pal: ThemePalette):
+        self._pal = pal
+        self._update_label_style()
+
+    def _update_label_style(self):
+        pal = self._pal
+        bg = pal.panel if pal else "#1e1e1e"
+        fg = pal.text_dim if pal else "#888888"
+        self._label.setStyleSheet(
+            f"background-color: {bg}; color: {fg}; font-size: 16px;"
+        )
 
     def stop(self):
         """Stop the polling timer."""

@@ -25,6 +25,17 @@ def _compute_diff(frame: np.ndarray, ref: np.ndarray | None) -> float:
     gray2 = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
     return float(np.mean(np.abs(gray1.astype(np.int16) - gray2.astype(np.int16))))
 
+
+def _manual_crop(frame: np.ndarray, region: tuple[int, int, int, int]) -> np.ndarray:
+    """Crop frame to region (x, y, w, h).  Clamps to frame bounds."""
+    x, y, w, h = region
+    fh, fw = frame.shape[:2]
+    x = max(0, x)
+    y = max(0, y)
+    w = max(1, min(w, fw - x))
+    h = max(1, min(h, fh - y))
+    return frame[y:y + h, x:x + w]
+
 from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
 from core.capture_pipeline import CapturePipeline
@@ -96,7 +107,7 @@ async def main(
     gui_mode: bool = False,
     frame_queue=None,
     status_bar=None,
-    history=None,
+    sidebar=None,
     preview=None,
     window=None,
 ):
@@ -231,16 +242,39 @@ async def main(
             side_menu = SideMenu(window)
             side_menu.hide()
 
+            # Invisible overlay behind the menu for click-to-close
+            overlay = QWidget(window)
+            overlay.setGeometry(0, 0, window.width(), window.height())
+            overlay.setStyleSheet("background: transparent;")
+            overlay.hide()
+            # Click overlay to close menu
+            def _overlay_clicked(e):
+                if e.button() == Qt.MouseButton.LeftButton:
+                    side_menu.hide()
+                    overlay.hide()
+                    e.accept()
+                else:
+                    e.ignore()
+            overlay.mouseReleaseEvent = _overlay_clicked
+
             def _reposition_menu():
-                side_menu.setGeometry(
-                    window.width() - 260, 0, 260, window.height()
-                )
+                side_menu.setGeometry(0, 0, 340, window.height())
+                overlay.setGeometry(0, 0, window.width(), window.height())
             window.resizeEvent = lambda e: (_reposition_menu(), e.accept())
             _reposition_menu()
+            side_menu.raise_()
 
-            controls.menu_requested.connect(
-                lambda: side_menu.setVisible(not side_menu.isVisible())
-            )
+            def _toggle_menu():
+                if side_menu.isVisible():
+                    side_menu.hide()
+                    overlay.hide()
+                else:
+                    side_menu.show()
+                    overlay.show()
+                    side_menu.raise_()
+
+            controls.menu_requested.connect(_toggle_menu)
+            side_menu.hide_requested.connect(_toggle_menu)
 
             # Stub TTS / Translate handlers — print to terminal for now
             def _on_tts_requested(text: str):
@@ -365,6 +399,40 @@ async def main(
             )
             side_menu.history_visible_changed.connect(sidebar.setVisible)
             side_menu.preview_visible_changed.connect(preview.setVisible)
+            side_menu.text_size_changed.connect(tray.set_text_size)
+            side_menu.tray_height_changed.connect(tray.set_tray_height)
+
+            # Theme helper: resolve "auto" to system preference
+            def _resolve_theme(theme_id: str) -> ThemePalette:
+                if theme_id == "light":
+                    return LIGHT
+                if theme_id == "dark":
+                    return DARK
+                # auto — check system
+                scheme = QApplication.styleHints().colorScheme()
+                return LIGHT if scheme == Qt.ColorScheme.Light else DARK
+
+            def _apply_theme(theme_id: str):
+                pal = _resolve_theme(theme_id)
+                controls.set_theme(pal)
+                tray.set_theme(pal)
+                sidebar.set_theme(pal)
+                side_menu.set_theme(pal)
+                status_bar.set_theme(pal)
+                preview.set_theme(pal)
+                # Update window and container backgrounds
+                window.setStyleSheet(f"background: {pal.bg};")
+                central.setStyleSheet(f"background: {pal.bg};")
+                content.setStyleSheet(f"background: {pal.bg};")
+                # Overlay remains invisible (click-to-close only)
+                overlay.setStyleSheet("background: transparent;")
+                # Re-emit current text/tray sizes so tray refreshes its stylesheet
+                tray.set_text_size("medium")
+                tray.set_tray_height("medium")
+
+            side_menu.theme_changed.connect(_apply_theme)
+            # Apply default auto on startup
+            _apply_theme("auto")
             side_menu.vn_cleaner_changed.connect(
                 lambda v: (
                     settings.__setitem__("vn_cleaner", v),
@@ -383,8 +451,7 @@ async def main(
                     side_menu.diff_threshold_changed.emit(8.0),
                 ]
             )
-            # Wire recapture buttons (header + tray) to force immediate OCR
-            controls.recapture_clicked.connect(lambda: ocr_trigger.set())
+            # Wire re-capture button in tray to force immediate OCR
             tray.recapture_requested.connect(lambda: ocr_trigger.set())
 
             ocr_trigger = asyncio.Event()
@@ -404,14 +471,14 @@ async def main(
                     if full_frame is not None:
                         frame_queue.append(full_frame.copy())
                         if settings["auto_capture"]:
-                            crop_frame = await capture.get_frame()
-                            if crop_frame is not None:
-                                diff = _compute_diff(crop_frame, ref_frame)
-                                if diff > settings["diff_threshold"]:
-                                    ref_frame = crop_frame.copy()
-                                    if _stabilize_task and not _stabilize_task.done():
-                                        _stabilize_task.cancel()
-                                    _stabilize_task = asyncio.ensure_future(_trigger_after_stabilize())
+                            region = capture.region or (0, 0, full_frame.shape[1], full_frame.shape[0])
+                            crop_frame = _manual_crop(full_frame, region)
+                            diff = _compute_diff(crop_frame, ref_frame)
+                            if diff > settings["diff_threshold"]:
+                                ref_frame = crop_frame.copy()
+                                if _stabilize_task and not _stabilize_task.done():
+                                    _stabilize_task.cancel()
+                                _stabilize_task = asyncio.ensure_future(_trigger_after_stabilize())
                     await asyncio.sleep(PREVIEW_INTERVAL)
 
             async def _ocr_task():
@@ -610,19 +677,22 @@ if __name__ == "__main__":
     # GUI mode: create preview window before starting capture
     if gui_mode:
         from PyQt6.QtWidgets import (
-            QMainWindow, QVBoxLayout, QHBoxLayout,
-            QWidget as QCentralWidget,
+            QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
         )
+        from PyQt6.QtCore import Qt
+        from ui.theme import DARK, LIGHT, ThemePalette
         from ui.preview_widget import PreviewWidget
         from ui.components import StatusBar
         from ui.history_sidebar import HistorySidebar
         from ui.transcription_tray import TranscriptionTray
 
         window = QMainWindow()
-        window.setWindowTitle(f"DesktopOCR \u2014 {hex(hwnd)}")
+        window.setWindowTitle(f"Personal OCR \u2014 {hex(hwnd)}")
         window.setMinimumSize(960, 640)
+        window.setStyleSheet("background: transparent;")
 
-        central = QCentralWidget()
+        central = QWidget()
+        central.setStyleSheet("background: transparent;")
         window.setCentralWidget(central)
         root_layout = QVBoxLayout(central)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -630,12 +700,14 @@ if __name__ == "__main__":
 
         # Two-column content area
         content = QWidget()
+        content.setStyleSheet("background: transparent;")
         content_layout = QHBoxLayout(content)
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
         # Left column: preview + transcription tray
         left_col = QWidget()
+        left_col.setStyleSheet("background: transparent;")
         left_layout = QVBoxLayout(left_col)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
@@ -651,16 +723,19 @@ if __name__ == "__main__":
 
         # Right column: history sidebar (340px)
         sidebar = HistorySidebar()
+        sidebar.setStyleSheet("background: transparent;")
         content_layout.addWidget(sidebar)
 
         # Status bar — full width, bottom
         status_bar = StatusBar()
+        status_bar.setStyleSheet("background: transparent;")
         status_bar.set_window_title(window_title)
 
         # Controls bar will be inserted at index 0 by GUI controls setup below
         root_layout.addWidget(content, stretch=1)
         root_layout.addWidget(status_bar)
 
+        preview.set_theme(DARK)
         window.show()
     else:
         frame_queue = None
@@ -687,7 +762,7 @@ if __name__ == "__main__":
                         gui_mode=gui_mode,
                         frame_queue=frame_queue,
                         status_bar=status_bar,
-                        history=history,
+                        sidebar=sidebar,
                         preview=preview,
                         window=window,
                     )

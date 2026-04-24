@@ -3,6 +3,7 @@
 from PyQt6.QtWidgets import (
     QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
+from ui.theme import ThemePalette
 
 
 class StatusBar(QWidget):
@@ -24,6 +25,12 @@ class StatusBar(QWidget):
             layout.addWidget(lbl)
 
         layout.addStretch()
+
+    def set_theme(self, pal: ThemePalette):
+        color = pal.text_dim if pal else "#ccc"
+        for lbl in (self._engine_label, self._fps_label,
+                     self._conf_label, self._window_label):
+            lbl.setStyleSheet(f"color: {color}; font-size: 12px;")
 
     def set_engine(self, name: str):
         self._engine_label.setText(f"Engine: {name}")

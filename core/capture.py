@@ -247,6 +247,11 @@ class ScreenCapture:
         self._region = (int(x), int(y), int(width), int(height))
         log.debug("Capture region set: x=%d y=%d w=%d h=%d", x, y, width, height)
 
+    @property
+    def region(self):
+        """Read-only view of the current capture region (x, y, w, h) or None."""
+        return self._region
+
     async def get_frame(self, full: bool = False) -> Optional[np.ndarray]:
         """
         Capture one frame, run frame-diff check, optionally crop to region, return BGR ndarray.
