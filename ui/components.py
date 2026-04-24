@@ -1,6 +1,8 @@
-"""Reusable PyQt6 UI components: status pill, history log, and engine selector dropdown."""
+"""Reusable PyQt6 UI components: status bar."""
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import (
+    QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+)
 
 
 class StatusBar(QWidget):

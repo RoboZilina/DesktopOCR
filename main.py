@@ -11,6 +11,19 @@ import time
 from collections import deque
 from datetime import datetime
 import cv2
+import numpy as np
+
+DIFF_THRESHOLD = 8.0
+PREVIEW_INTERVAL = 0.25
+STABILIZE_DELAY = 0.5
+
+def _compute_diff(frame: np.ndarray, ref: np.ndarray | None) -> float:
+    """Return mean absolute pixel difference between two BGR frames."""
+    if ref is None or frame.shape != ref.shape:
+        return 999.0
+    gray1 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    gray2 = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
+    return float(np.mean(np.abs(gray1.astype(np.int16) - gray2.astype(np.int16))))
 
 from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
@@ -83,6 +96,7 @@ async def main(
     gui_mode: bool = False,
     frame_queue=None,
     status_bar=None,
+    history=None,
     preview=None,
     window=None,
 ):
@@ -196,6 +210,50 @@ async def main(
             logger.error("Failed to load engine: %s", args.engine)
             return
 
+        # ---- GUI controls setup -----------------------------------
+        if gui_mode:
+            from ui.controls_bar import ControlsBar
+
+            controls = ControlsBar(engine_manager.get_supported_engines())
+            controls.set_engine(engine_manager.current_id)
+            root_layout.insertWidget(0, controls)
+
+            async def _on_engine_changed(engine_id: str):
+                ok = await engine_manager.switch_engine(engine_id)
+                if ok:
+                    status_bar.set_engine(engine_id)
+
+            controls.engine_changed.connect(
+                lambda eid: asyncio.ensure_future(_on_engine_changed(eid))
+            )
+
+            from ui.side_menu import SideMenu
+            side_menu = SideMenu(window)
+            side_menu.hide()
+
+            def _reposition_menu():
+                side_menu.setGeometry(
+                    window.width() - 260, 0, 260, window.height()
+                )
+            window.resizeEvent = lambda e: (_reposition_menu(), e.accept())
+            _reposition_menu()
+
+            controls.menu_requested.connect(
+                lambda: side_menu.setVisible(not side_menu.isVisible())
+            )
+
+            # Stub TTS / Translate handlers — print to terminal for now
+            def _on_tts_requested(text: str):
+                print(f"[TTS stub] {text}")
+
+            def _on_translate_requested(text: str):
+                print(f"[Translate stub] {text}")
+
+            tray.tts_requested.connect(_on_tts_requested)
+            tray.translate_requested.connect(_on_translate_requested)
+            sidebar.tts_requested.connect(_on_tts_requested)
+            sidebar.translate_requested.connect(_on_translate_requested)
+
         if args.debug_once:
             logger.info("Running one-shot OCR debug pass...")
             frame = await capture.get_frame()
@@ -268,17 +326,13 @@ async def main(
 
         # ---- GUI mode capture loop --------------------------------
         if gui_mode:
-            from PyQt6.QtWidgets import QApplication
-
             logger.info("Starting GUI capture loop...")
 
-            # CloseEvent handler: flag the loop to stop when window is closed
-            # TODO(Stage 4): replace with qasync shutdown
-            _gui_running = True
-            def _on_close():
-                nonlocal _gui_running
-                _gui_running = False
-            window.closeEvent = lambda e: (_on_close(), e.accept())
+            stop_event = asyncio.Event()
+            def _on_close(e):
+                stop_event.set()
+                e.accept()
+            window.closeEvent = _on_close
 
             # Connect overlay selection to capture region updates
             def _on_region_changed(nx, ny, nw, nh):
@@ -294,36 +348,124 @@ async def main(
 
             preview.selection_overlay.region_changed.connect(_on_region_changed)
 
-            while _gui_running:
-                frame = await capture.get_frame(full=True)
-                if frame is not None:
-                    # Push full window frame into deque for preview widget
-                    frame_queue.append(frame.copy())
+            # Mutable settings container — accessible from lambda callbacks
+            settings = {
+                "auto_capture": True,
+                "auto_copy": False,
+                "vn_cleaner": True,
+                "diff_threshold": DIFF_THRESHOLD,
+            }
 
-                    # Run OCR
+            # Wire side menu toggles
+            side_menu.auto_capture_changed.connect(
+                lambda v: settings.__setitem__("auto_capture", v)
+            )
+            side_menu.auto_copy_changed.connect(
+                lambda v: settings.__setitem__("auto_copy", v)
+            )
+            side_menu.history_visible_changed.connect(sidebar.setVisible)
+            side_menu.preview_visible_changed.connect(preview.setVisible)
+            side_menu.vn_cleaner_changed.connect(
+                lambda v: (
+                    settings.__setitem__("vn_cleaner", v),
+                    os.environ.pop("DESKTOCR_DISABLE_VALIDATOR", None) if v else os.environ.__setitem__("DESKTOCR_DISABLE_VALIDATOR", "1"),
+                )
+            )
+            side_menu.diff_threshold_changed.connect(
+                lambda v: settings.__setitem__("diff_threshold", v)
+            )
+            side_menu.reset_requested.connect(
+                lambda: [
+                    settings.update({"auto_capture": True, "auto_copy": False, "vn_cleaner": True, "diff_threshold": 8.0}),
+                    side_menu.auto_capture_changed.emit(True),
+                    side_menu.auto_copy_changed.emit(False),
+                    side_menu.vn_cleaner_changed.emit(True),
+                    side_menu.diff_threshold_changed.emit(8.0),
+                ]
+            )
+            # Wire recapture buttons (header + tray) to force immediate OCR
+            controls.recapture_clicked.connect(lambda: ocr_trigger.set())
+            tray.recapture_requested.connect(lambda: ocr_trigger.set())
+
+            ocr_trigger = asyncio.Event()
+            ref_frame: np.ndarray | None = None
+            _capture_gen = 0  # incremented on each OCR trigger; stale results discarded
+
+            async def _preview_task():
+                nonlocal ref_frame
+                _stabilize_task: asyncio.Task | None = None
+
+                async def _trigger_after_stabilize():
+                    await asyncio.sleep(STABILIZE_DELAY)
+                    ocr_trigger.set()
+
+                while not stop_event.is_set():
+                    full_frame = await capture.get_frame(full=True)
+                    if full_frame is not None:
+                        frame_queue.append(full_frame.copy())
+                        if settings["auto_capture"]:
+                            crop_frame = await capture.get_frame()
+                            if crop_frame is not None:
+                                diff = _compute_diff(crop_frame, ref_frame)
+                                if diff > settings["diff_threshold"]:
+                                    ref_frame = crop_frame.copy()
+                                    if _stabilize_task and not _stabilize_task.done():
+                                        _stabilize_task.cancel()
+                                    _stabilize_task = asyncio.ensure_future(_trigger_after_stabilize())
+                    await asyncio.sleep(PREVIEW_INTERVAL)
+
+            async def _ocr_task():
+                nonlocal _capture_gen
+                while not stop_event.is_set():
+                    if settings["auto_capture"]:
+                        try:
+                            await asyncio.wait_for(ocr_trigger.wait(), timeout=0.5)
+                            ocr_trigger.clear()
+                        except asyncio.TimeoutError:
+                            continue
+                        _capture_gen += 1
+                        this_gen = _capture_gen
+                    else:
+                        await asyncio.sleep(1.5)
+                        if stop_event.is_set():
+                            break
+                        this_gen = None
+
+                    if stop_event.is_set():
+                        break
+
                     res = await pipeline.capture_once()
+
+                    # Discard stale result if a newer trigger fired during OCR
+                    if this_gen is not None and this_gen != _capture_gen:
+                        continue
+
                     if res is not None:
                         text = res.get("text", "")
                         conf = res.get("confidence", 0.0)
-                        meta = res.get("meta", {}) if isinstance(res, dict) else {}
-                        engine_id = meta.get("engine", engine_manager.current_id)
+                        engine_id = engine_manager.current_id
                         status_bar.set_engine(engine_id)
                         status_bar.set_confidence(float(conf))
-                        if text:
-                            status_bar.set_window_title(text[:60])
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
+                        if text:
+                            tray.set_ocr_text(text)
+                        sidebar.add_entry(timestamp, engine_id, float(conf), text)
+                        if settings["auto_copy"] and text:
+                            from PyQt6.QtWidgets import QApplication
+                            QApplication.clipboard().setText(text)
 
-                # Pump Qt events -- critical for preview responsiveness
-                # Placed BEFORE sleep to prevent 1.5s UI freeze
-                QApplication.processEvents()
-
-                await asyncio.sleep(1.5)
-
-            # Cleanup on window close
-            preview.stop()
-            window.close()
-            logger.info("GUI window closed. Stopping capture.")
+            preview_task = asyncio.ensure_future(_preview_task())
+            ocr_task = asyncio.ensure_future(_ocr_task())
+            try:
+                await stop_event.wait()
+            finally:
+                preview_task.cancel()
+                ocr_task.cancel()
+                await asyncio.gather(preview_task, ocr_task, return_exceptions=True)
+                preview.stop()
+                window.close()
+                logger.info("GUI window closed. Stopping capture.")
             return
 
         while True:
@@ -448,6 +590,7 @@ if __name__ == "__main__":
 
     # Resolve HWND: --hwnd flag or GUI picker dialog
     hwnd: int | None = None
+    window_title: str | None = None
     if args.hwnd:
         hwnd = _resolve_hwnd_from_arg(args.hwnd, logging.getLogger(__name__))
     else:
@@ -456,48 +599,101 @@ if __name__ == "__main__":
         dialog = WindowPickerDialog()
         if dialog.exec() == QDialog.DialogCode.Accepted:
             hwnd = dialog.selected_hwnd
+            window_title = dialog.selected_title
 
     if hwnd is None:
         sys.exit("No window selected. Use --hwnd or run without it to open the picker.")
 
+    if window_title is None:
+        window_title = hex(hwnd)
+
     # GUI mode: create preview window before starting capture
     if gui_mode:
-        from PyQt6.QtWidgets import QMainWindow, QVBoxLayout, QWidget as QCentralWidget
+        from PyQt6.QtWidgets import (
+            QMainWindow, QVBoxLayout, QHBoxLayout,
+            QWidget as QCentralWidget,
+        )
         from ui.preview_widget import PreviewWidget
         from ui.components import StatusBar
+        from ui.history_sidebar import HistorySidebar
+        from ui.transcription_tray import TranscriptionTray
 
         window = QMainWindow()
         window.setWindowTitle(f"DesktopOCR \u2014 {hex(hwnd)}")
-        window.setMinimumSize(640, 480)
+        window.setMinimumSize(960, 640)
 
         central = QCentralWidget()
         window.setCentralWidget(central)
-        layout = QVBoxLayout(central)
+        root_layout = QVBoxLayout(central)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
+        # Two-column content area
+        content = QWidget()
+        content_layout = QHBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        # Left column: preview + transcription tray
+        left_col = QWidget()
+        left_layout = QVBoxLayout(left_col)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
 
         frame_queue: deque = deque(maxlen=1)
         preview = PreviewWidget(frame_queue)
-        layout.addWidget(preview, stretch=1)
+        left_layout.addWidget(preview, stretch=1)
 
+        tray = TranscriptionTray()
+        left_layout.addWidget(tray)
+
+        content_layout.addWidget(left_col, stretch=1)
+
+        # Right column: history sidebar (340px)
+        sidebar = HistorySidebar()
+        content_layout.addWidget(sidebar)
+
+        # Status bar — full width, bottom
         status_bar = StatusBar()
-        layout.addWidget(status_bar)
+        status_bar.set_window_title(window_title)
+
+        # Controls bar will be inserted at index 0 by GUI controls setup below
+        root_layout.addWidget(content, stretch=1)
+        root_layout.addWidget(status_bar)
 
         window.show()
     else:
         frame_queue = None
         preview = None
         status_bar = None
+        tray = None
+        sidebar = None
         window = None
 
     try:
-        asyncio.run(
-            main(
-                hwnd,
-                gui_mode=gui_mode,
-                frame_queue=frame_queue,
-                status_bar=status_bar,
-                preview=preview,
-                window=window,
-            )
-        )
+        import qasync, signal
+        loop = qasync.QEventLoop(app)
+        asyncio.set_event_loop(loop)
+
+        def _handle_sigint(*_):
+            loop.call_soon_threadsafe(loop.stop)
+        signal.signal(signal.SIGINT, _handle_sigint)
+
+        with loop:
+            try:
+                loop.run_until_complete(
+                    main(
+                        hwnd,
+                        gui_mode=gui_mode,
+                        frame_queue=frame_queue,
+                        status_bar=status_bar,
+                        history=history,
+                        preview=preview,
+                        window=window,
+                    )
+                )
+            except RuntimeError as e:
+                if "Event loop stopped before Future completed" not in str(e):
+                    raise
     except KeyboardInterrupt:
         pass
