@@ -9,7 +9,6 @@ VOICE_DEFAULT = "ja-JP-NanamiNeural"
 VOICES = {
     "nanami": "ja-JP-NanamiNeural",
     "keita": "ja-JP-KeitaNeural",
-    "aoi": "ja-JP-AoiNeural",
 }
 
 
@@ -73,7 +72,8 @@ class EdgeTTS:
             self.voice = voice
             logger.info("Edge TTS voice set to: %s", voice)
         else:
-            logger.warning("Unknown Edge TTS voice key: %s", voice_key)
+            logger.warning("Unknown Edge TTS voice key '%s', falling back to %s", voice_key, VOICE_DEFAULT)
+            self.voice = VOICE_DEFAULT
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = enabled

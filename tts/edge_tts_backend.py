@@ -42,7 +42,6 @@ class EdgeTTSBackend(TTSBackend):
         return [
             ("Edge Nanami ☁️", "nanami"),
             ("Edge Keita ☁️", "keita"),
-            ("Edge Aoi ☁️", "aoi"),
         ]
 
     def set_voice(self, voice_id):
