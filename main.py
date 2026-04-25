@@ -107,15 +107,7 @@ def list_windows():
         print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {safe_title}")
     print("-----------------------")
 
-async def main(
-    hwnd: int,
-    gui_mode: bool = False,
-    frame_queue=None,
-    status_bar=None,
-    sidebar=None,
-    preview=None,
-    window=None,
-):
+async def main(hwnd, gui_mode=True, window=None, window_title=""):
     args = parse_args()
 
     engine_manager = EngineManager("models/paddle", {"det": "", "rec": "", "dict": ""})
@@ -228,65 +220,20 @@ async def main(
 
         # ---- GUI controls setup -----------------------------------
         if gui_mode:
-            from ui.controls_bar import ControlsBar
-
-            controls = ControlsBar(engine_manager.get_supported_engines())
-            controls.set_engine(engine_manager.current_id)
-            root_layout.insertWidget(0, controls)
-
             async def _on_engine_changed(engine_id: str):
                 ok = await engine_manager.switch_engine(engine_id)
                 if ok:
-                    status_bar.set_engine(engine_id)
+                    window.set_status(engine_id, 0.0, 0.0, window_title or hex(hwnd))
 
-            controls.engine_changed.connect(
+            window.engine_changed.connect(
                 lambda eid: asyncio.ensure_future(_on_engine_changed(eid))
             )
-
-            from ui.side_menu import SideMenu
-            side_menu = SideMenu(window)
-            side_menu.hide()
-
-            # Invisible overlay behind the menu for click-to-close
-            overlay = QWidget(window)
-            overlay.setGeometry(0, 0, window.width(), window.height())
-            overlay.setStyleSheet("background: transparent;")
-            overlay.hide()
-            # Click overlay to close menu
-            def _overlay_clicked(e):
-                if e.button() == Qt.MouseButton.LeftButton:
-                    side_menu.hide()
-                    overlay.hide()
-                    e.accept()
-                else:
-                    e.ignore()
-            overlay.mouseReleaseEvent = _overlay_clicked
-
-            def _reposition_menu():
-                side_menu.setGeometry(0, 0, 340, window.height())
-                overlay.setGeometry(0, 0, window.width(), window.height())
-            window.resizeEvent = lambda e: (_reposition_menu(), e.accept())
-            _reposition_menu()
-            side_menu.raise_()
-
-            def _toggle_menu():
-                if side_menu.isVisible():
-                    side_menu.hide()
-                    overlay.hide()
-                else:
-                    side_menu.show()
-                    overlay.show()
-                    side_menu.raise_()
-
-            controls.menu_requested.connect(_toggle_menu)
-            side_menu.hide_requested.connect(_toggle_menu)
 
             # Stub translate handler — print to terminal for now
             def _on_translate_requested(text: str):
                 print(f"[Translate stub] {text}")
 
-            tray.translate_requested.connect(_on_translate_requested)
-            sidebar.translate_requested.connect(_on_translate_requested)
+            window.translate_requested.connect(_on_translate_requested)
 
         if args.debug_once:
             logger.info("Running one-shot OCR debug pass...")
@@ -370,7 +317,7 @@ async def main(
 
             # Connect overlay selection to capture region updates
             def _on_region_changed(nx, ny, nw, nh):
-                imgW, imgH = preview.frame_size
+                imgW, imgH = window.preview_widget.frame_size
                 if imgW == 0 or imgH == 0:
                     return
                 x = int(nx * imgW)
@@ -380,7 +327,7 @@ async def main(
                 capture.set_region(x, y, w, h)
                 logger.info("Region selected: x=%d y=%d w=%d h=%d", x, y, w, h)
 
-            preview.selection_overlay.region_changed.connect(_on_region_changed)
+            window.preview_widget.selection_overlay.region_changed.connect(_on_region_changed)
 
             # Mutable settings container — accessible from lambda callbacks
             settings = {
@@ -391,68 +338,34 @@ async def main(
             }
 
             # Wire side menu toggles
-            side_menu.auto_capture_changed.connect(
+            window.side_menu.auto_capture_changed.connect(
                 lambda v: settings.__setitem__("auto_capture", v)
             )
-            side_menu.auto_copy_changed.connect(
+            window.side_menu.auto_copy_changed.connect(
                 lambda v: settings.__setitem__("auto_copy", v)
             )
-            side_menu.history_visible_changed.connect(sidebar.setVisible)
-            side_menu.preview_visible_changed.connect(preview.setVisible)
-            side_menu.text_size_changed.connect(tray.set_text_size)
-            side_menu.tray_height_changed.connect(tray.set_tray_height)
-
-            # Theme helper: resolve "auto" to system preference
-            def _resolve_theme(theme_id: str) -> ThemePalette:
-                if theme_id == "light":
-                    return LIGHT
-                if theme_id == "dark":
-                    return DARK
-                # auto — check system
-                scheme = QApplication.styleHints().colorScheme()
-                return LIGHT if scheme == Qt.ColorScheme.Light else DARK
-
-            def _apply_theme(theme_id: str):
-                pal = _resolve_theme(theme_id)
-                controls.set_theme(pal)
-                tray.set_theme(pal)
-                sidebar.set_theme(pal)
-                side_menu.set_theme(pal)
-                status_bar.set_theme(pal)
-                preview.set_theme(pal)
-                # Update window and container backgrounds
-                window.setStyleSheet(f"background: {pal.bg};")
-                central.setStyleSheet(f"background: {pal.bg};")
-                content.setStyleSheet(f"background: {pal.bg};")
-                # Overlay remains invisible (click-to-close only)
-                overlay.setStyleSheet("background: transparent;")
-                # Re-emit current text/tray sizes so tray refreshes its stylesheet
-                tray.set_text_size("medium")
-                tray.set_tray_height("medium")
-
-            side_menu.theme_changed.connect(_apply_theme)
-            # Apply default auto on startup
-            _apply_theme("auto")
-            side_menu.vn_cleaner_changed.connect(
+            window.side_menu.history_visible_changed.connect(window.history_sidebar.setVisible)
+            window.side_menu.preview_visible_changed.connect(window.preview_widget.setVisible)
+            window.side_menu.text_size_changed.connect(window.transcription_tray.set_text_size)
+            window.side_menu.tray_height_changed.connect(window.transcription_tray.set_tray_height)
+            window.side_menu.vn_cleaner_changed.connect(
                 lambda v: (
                     settings.__setitem__("vn_cleaner", v),
                     os.environ.pop("DESKTOCR_DISABLE_VALIDATOR", None) if v else os.environ.__setitem__("DESKTOCR_DISABLE_VALIDATOR", "1"),
                 )
             )
-            side_menu.diff_threshold_changed.connect(
+            window.side_menu.diff_threshold_changed.connect(
                 lambda v: settings.__setitem__("diff_threshold", v)
             )
-            side_menu.reset_requested.connect(
+            window.side_menu.reset_requested.connect(
                 lambda: [
                     settings.update({"auto_capture": True, "auto_copy": False, "vn_cleaner": True, "diff_threshold": 8.0}),
-                    side_menu.auto_capture_changed.emit(True),
-                    side_menu.auto_copy_changed.emit(False),
-                    side_menu.vn_cleaner_changed.emit(True),
-                    side_menu.diff_threshold_changed.emit(8.0),
+                    window.side_menu.auto_capture_changed.emit(True),
+                    window.side_menu.auto_copy_changed.emit(False),
+                    window.side_menu.vn_cleaner_changed.emit(True),
+                    window.side_menu.diff_threshold_changed.emit(8.0),
                 ]
             )
-            # Wire re-capture button in tray to force immediate OCR
-            tray.recapture_requested.connect(lambda: ocr_trigger.set())
 
             # TTS manager (OpenJTalk active, VoiceVox fallback)
             tts = TTSManager([
@@ -460,15 +373,17 @@ async def main(
                 VoiceVoxBackend(),
             ])
             tts.set_backend("coeiroink")
-            tray.tts_requested.connect(tts.speak)
-            sidebar.tts_requested.connect(tts.speak)
+            window.tts_requested.connect(tts.speak)
 
             # Populate voice selector from TTS backend
             voices = tts.list_voices()
-            controls.load_voices(voices)
-            controls.voice_changed.connect(lambda vid: tts.set_voice(vid))
+            window.controls_bar.load_voices(voices)
+            window.controls_bar.voice_changed.connect(lambda vid: tts.set_voice(vid))
 
             ocr_trigger = asyncio.Event()
+
+            # Wire re-capture button in tray to force immediate OCR
+            window.recapture_requested.connect(ocr_trigger.set)
             ref_frame: np.ndarray | None = None
             _capture_gen = 0  # incremented on each OCR trigger; stale results discarded
 
@@ -483,7 +398,7 @@ async def main(
                 while not stop_event.is_set():
                     full_frame = await capture.get_frame(full=True)
                     if full_frame is not None:
-                        frame_queue.append(full_frame.copy())
+                        window.set_preview_frame(full_frame)
                         if settings["auto_capture"]:
                             region = capture.region or (0, 0, full_frame.shape[1], full_frame.shape[0])
                             crop_frame = _manual_crop(full_frame, region)
@@ -525,16 +440,15 @@ async def main(
                         text = res.get("text", "")
                         conf = res.get("confidence", 0.0)
                         engine_id = engine_manager.current_id
-                        status_bar.set_engine(engine_id)
-                        status_bar.set_confidence(float(conf))
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
                         if text:
-                            tray.set_ocr_text(text)
-                        sidebar.add_entry(timestamp, engine_id, float(conf), text)
+                            window.set_ocr_result(text, float(conf), engine_id, timestamp)
                         if settings["auto_copy"] and text:
                             from PyQt6.QtWidgets import QApplication
                             QApplication.clipboard().setText(text)
+
+                    await asyncio.sleep(1.5)
 
             preview_task = asyncio.ensure_future(_preview_task())
             ocr_task = asyncio.ensure_future(_ocr_task())
@@ -544,7 +458,7 @@ async def main(
                 preview_task.cancel()
                 ocr_task.cancel()
                 await asyncio.gather(preview_task, ocr_task, return_exceptions=True)
-                preview.stop()
+                window.preview_widget.stop()
                 window.close()
                 logger.info("GUI window closed. Stopping capture.")
             return
@@ -688,76 +602,14 @@ if __name__ == "__main__":
     if window_title is None:
         window_title = hex(hwnd)
 
-    # GUI mode: create preview window before starting capture
+    # GUI mode: create MainWindow
     if gui_mode:
-        from PyQt6.QtWidgets import (
-            QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
-        )
-        from PyQt6.QtCore import Qt
-        from ui.theme import DARK, LIGHT, ThemePalette
-        from ui.preview_widget import PreviewWidget
-        from ui.components import StatusBar
-        from ui.history_sidebar import HistorySidebar
-        from ui.transcription_tray import TranscriptionTray
+        from ui.main_window import MainWindow
 
-        window = QMainWindow()
-        window.setWindowTitle(f"Personal OCR \u2014 {hex(hwnd)}")
-        window.setMinimumSize(960, 640)
-        window.resize(1440, 960)
-        window.setStyleSheet("background: transparent;")
-
-        central = QWidget()
-        central.setStyleSheet("background: transparent;")
-        window.setCentralWidget(central)
-        root_layout = QVBoxLayout(central)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-
-        # Two-column content area
-        content = QWidget()
-        content.setStyleSheet("background: transparent;")
-        content_layout = QHBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(0)
-
-        # Left column: preview + transcription tray
-        left_col = QWidget()
-        left_col.setStyleSheet("background: transparent;")
-        left_layout = QVBoxLayout(left_col)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
-
-        frame_queue: deque = deque(maxlen=1)
-        preview = PreviewWidget(frame_queue)
-        left_layout.addWidget(preview, stretch=1)
-
-        tray = TranscriptionTray()
-        left_layout.addWidget(tray)
-
-        content_layout.addWidget(left_col, stretch=1)
-
-        # Right column: history sidebar (340px)
-        sidebar = HistorySidebar()
-        sidebar.setStyleSheet("background: transparent;")
-        content_layout.addWidget(sidebar)
-
-        # Status bar — full width, bottom
-        status_bar = StatusBar()
-        status_bar.setStyleSheet("background: transparent;")
-        status_bar.set_window_title(window_title)
-
-        # Controls bar will be inserted at index 0 by GUI controls setup below
-        root_layout.addWidget(content, stretch=1)
-        root_layout.addWidget(status_bar)
-
-        preview.set_theme(DARK)
+        window = MainWindow()
+        window.set_status("—", 0.0, 0.0, window_title or hex(hwnd))
         window.show()
     else:
-        frame_queue = None
-        preview = None
-        status_bar = None
-        tray = None
-        sidebar = None
         window = None
 
     try:
@@ -775,11 +627,8 @@ if __name__ == "__main__":
                     main(
                         hwnd,
                         gui_mode=gui_mode,
-                        frame_queue=frame_queue,
-                        status_bar=status_bar,
-                        sidebar=sidebar,
-                        preview=preview,
                         window=window,
+                        window_title=window_title,
                     )
                 )
             except RuntimeError as e:

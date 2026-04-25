@@ -74,15 +74,13 @@ class TranscriptionTray(QWidget):
         sel_header.addStretch()
 
 
-        self._speak_btn = QPushButton("🔊")
-        self._speak_btn.setFixedSize(28, 28)
-        self._speak_btn.setToolTip("Speak selected text")
-        self._speak_btn.setStyleSheet(
-            "background: #1a1a1f; color: #10b981; border: 1px solid #2a2a2f; "
-            "border-radius: 6px; font-size: 14px;"
-        )
+        self._speak_btn = QPushButton("\U0001F50A")
+        self._speak_btn.setFlat(True)
+        self._speak_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._speak_btn.clicked.connect(
-            lambda: self.tts_requested.emit(self._sel_text.toPlainText())
+            lambda: self.tts_requested.emit(
+                self._sel_text.toPlainText() or self._ocr_text.toPlainText()
+            )
         )
         sel_header.addWidget(self._speak_btn)
         self._translate_btn = QPushButton("🌐 Translate")
@@ -134,29 +132,20 @@ class TranscriptionTray(QWidget):
 
     def _text_style(self, large=False, size=None) -> str:
         if size is None:
-            size = "26px" if large else "18px"
-        else:
-            size = f"{size}px"
+            size = 26 if large else 18
         pal = getattr(self, '_pal', None)
         bg = pal.bg if pal else "#050506"
         text = pal.text if pal else "#ffffff"
         border = pal.border if pal else "#1f1f23"
         return f"""
-            "QPushButton#recap-btn:hover {{ background: rgba(0,0,0,0.4); }}"
-            "QPushButton#speak-btn {{"
-            "background: #1a1a1f; color: #10b981;"
-            "border: 1px solid #2a2a2f; border-radius: 6px;"
-            "font-size: 14px;"
-            "}}"
-            "QPushButton#speak-btn:hover {{ background: #10b981; color: #1a1a1f; }}"
-            "QTextEdit {{"
-                "background: {bg};"
-                "color: {text};"
-                "border: 1px solid {border};"
-                "border-radius: 6px;"
-                "font-size: {size};"
-                "padding: 6px;"
-            "}}"
+            QTextEdit {{
+                background: {bg};
+                color: {text};
+                border: 1px solid {border};
+                border-radius: 6px;
+                font-size: {size}px;
+                padding: 6px;
+            }}
         """
 
     def _on_selection_changed(self):

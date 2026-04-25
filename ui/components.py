@@ -1,17 +1,18 @@
 """Reusable PyQt6 UI components: status bar."""
 
 from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QVBoxLayout, QStatusBar, QWidget,
 )
 from ui.theme import ThemePalette
 
 
-class StatusBar(QWidget):
+class StatusBar(QStatusBar):
     """Bottom status bar showing engine, FPS, window info."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        layout = QHBoxLayout(self)
+        container = QWidget()
+        layout = QHBoxLayout(container)
         layout.setContentsMargins(8, 4, 8, 4)
 
         self._engine_label = QLabel("Engine: \u2014")
@@ -25,6 +26,7 @@ class StatusBar(QWidget):
             layout.addWidget(lbl)
 
         layout.addStretch()
+        self.addWidget(container, 1)
 
     def set_theme(self, pal: ThemePalette):
         color = pal.text_dim if pal else "#ccc"

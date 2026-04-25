@@ -1,5 +1,6 @@
 from .base import TTSBackend
 from .coeiroink_backend import COEIROINKBackend
+from .edge_tts_backend import EdgeTTSBackend
 
 
 class TTSManager:
@@ -10,6 +11,9 @@ class TTSManager:
         # register COEIROINK only if not already provided
         if "coeiroink" not in self.backends:
             self.backends["coeiroink"] = COEIROINKBackend()
+        # register Edge TTS only if not already provided
+        if "edge_tts" not in self.backends:
+            self.backends["edge_tts"] = EdgeTTSBackend()
 
         # default active backend
         self.active = next(iter(self.backends.values()))

@@ -78,8 +78,9 @@ class PreviewWidget(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if hasattr(self, "_overlay") and hasattr(self, "_label"):
-            self._overlay.setGeometry(self._label.geometry())
+        QTimer.singleShot(0, lambda: self._overlay.setGeometry(
+            self._label.geometry()
+        ))
 
     def _poll_frame(self):
         """Pop the latest frame from the deque and update display."""
