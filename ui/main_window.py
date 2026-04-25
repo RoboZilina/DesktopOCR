@@ -6,7 +6,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QApplication
 
-from ui.theme import DARK, LIGHT, ThemePalette
+from ui.theme import DARK, LIGHT, ThemePalette, apply_theme
 from ui.controls_bar import ControlsBar
 from ui.preview_widget import PreviewWidget
 from ui.transcription_tray import TranscriptionTray
@@ -33,6 +33,7 @@ class MainWindow(QMainWindow):
         # Controls bar (top)
         self.controls_bar = ControlsBar(["paddle", "easyocr", "windows_ocr"])
         self.setMenuWidget(self.controls_bar)
+        self.controls_bar._menu_btn.raise_()
 
         # Central widget: left column (preview + tray) + right column (history)
         central = QWidget()
@@ -104,6 +105,9 @@ class MainWindow(QMainWindow):
         self._apply_pal(pal)
 
     def _apply_pal(self, pal: ThemePalette):
+        app = QApplication.instance()
+        if app is not None:
+            apply_theme(app, pal)
         self.setStyleSheet(f"background: {pal.bg};")
         self.controls_bar.set_theme(pal)
         self.transcription_tray.set_theme(pal)

@@ -1,7 +1,7 @@
 """Header controls bar — mirrors web app's top nav bar."""
 
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from ui.theme import ThemePalette, DARK
 
 
@@ -29,6 +29,8 @@ class ControlsBar(QWidget):
     engine_changed = pyqtSignal(str)
     menu_requested = pyqtSignal()
     voice_changed = pyqtSignal(str)
+    select_window_requested = pyqtSignal()
+    stop_stream_requested = pyqtSignal()
 
     def __init__(self, engines: list[str], parent=None):
         super().__init__(parent)
@@ -94,7 +96,44 @@ class ControlsBar(QWidget):
         self.voice_selector.currentTextChanged.connect(self._emit_voice_change)
         layout.addWidget(self.voice_selector)
 
+        layout.addSpacing(12)
+
+        # Stream toggle button (green = select window, red = stop stream)
+        self._stream_btn = QPushButton("Select Source Window")
+        self._stream_btn.setObjectName("StreamButton")
+        self._stream_btn.setFixedHeight(32)
+        self._stream_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._stream_btn.clicked.connect(self._on_stream_btn_clicked)
+        self._streaming = False
+        self._update_stream_btn_style()
+        layout.addWidget(self._stream_btn)
+
         layout.addStretch()
+
+    def _update_stream_btn_style(self):
+        if self._streaming:
+            self._stream_btn.setText("Stop Stream")
+            self._stream_btn.setStyleSheet(
+                "background: #b91c1c; color: #fff; border: none; border-radius: 6px; font-weight: bold;"
+            )
+        else:
+            self._stream_btn.setText("Select Source Window")
+            self._stream_btn.setStyleSheet(
+                "background: #059669; color: #fff; border: none; border-radius: 6px; font-weight: bold;"
+            )
+
+    def _on_stream_btn_clicked(self):
+        if self._streaming:
+            self.stop_stream_requested.emit()
+            self._streaming = False
+        else:
+            self.select_window_requested.emit()
+            self._streaming = True
+        self._update_stream_btn_style()
+
+    def set_streaming(self, streaming: bool):
+        self._streaming = streaming
+        self._update_stream_btn_style()
 
     def set_engine(self, engine_id: str):
         """Set combo without firing signal."""

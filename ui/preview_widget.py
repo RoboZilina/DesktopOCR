@@ -50,10 +50,23 @@ class PreviewWidget(QWidget):
         )
         layout.addWidget(self._label)
 
+        self._hint_label = QLabel(
+            "Click and drag on the preview to select a text region. "
+            "Keep the selection tight around the text to prevent ghost characters."
+        )
+        self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hint_label.setWordWrap(True)
+        self._hint_label.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
+        layout.addWidget(self._hint_label)
+
         # Overlay for click-and-drag region selection
         self._overlay = SelectionOverlay(self._get_frame_size, self)
         self._overlay.setGeometry(self._label.geometry())
         self._overlay.raise_()  # ensure overlay is painted on top
+        self._overlay.selection_changed.connect(self._on_selection_changed)
 
         # Timer: poll deque at 50ms (~20 fps)
         self._timer = QTimer(self)
@@ -127,6 +140,7 @@ class PreviewWidget(QWidget):
     def set_theme(self, pal: ThemePalette):
         self._pal = pal
         self._update_label_style()
+        self._update_hint_style()
 
     def _update_label_style(self):
         pal = self._pal
@@ -134,6 +148,18 @@ class PreviewWidget(QWidget):
         fg = pal.text_dim if pal else "#888888"
         self._label.setStyleSheet(
             f"background-color: {bg}; color: {fg}; font-size: 16px;"
+        )
+
+    def _on_selection_changed(self):
+        rect = self._overlay.selected_rect
+        if rect is not None and not rect.isEmpty():
+            self._hint_label.hide()
+
+    def _update_hint_style(self):
+        pal = self._pal
+        fg = pal.text_dim if pal else "#888888"
+        self._hint_label.setStyleSheet(
+            f"color: {fg}; font-size: 12px; padding: 4px;"
         )
 
     def stop(self):

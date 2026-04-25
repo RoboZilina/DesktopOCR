@@ -1,6 +1,7 @@
 """Theme system — mirrors web app's CSS variable palettes."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -49,3 +50,24 @@ LIGHT = ThemePalette(
     warn="#d97706",
     name="light",
 )
+
+
+def load_qss_template() -> str:
+    template_path = Path(__file__).parent / "theme_template.qss"
+    return template_path.read_text(encoding="utf-8")
+
+
+def apply_theme(app, pal: ThemePalette):
+    template = load_qss_template()
+    qss = (
+        template
+        .replace("{BG}", pal.bg)
+        .replace("{PANEL}", pal.panel)
+        .replace("{ACCENT}", pal.accent)
+        .replace("{ACCENT_GLOW}", pal.accent_glow)
+        .replace("{TEXT}", pal.text)
+        .replace("{TEXT_DIM}", pal.text_dim)
+        .replace("{TEXT_SECONDARY}", pal.text_secondary)
+        .replace("{BORDER}", pal.border)
+    )
+    app.setStyleSheet(qss)

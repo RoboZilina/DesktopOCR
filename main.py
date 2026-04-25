@@ -383,7 +383,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             ocr_trigger = asyncio.Event()
 
             # Wire re-capture button in tray to force immediate OCR
-            window.recapture_requested.connect(ocr_trigger.set)
+            def _on_recapture():
+                if hwnd is None:
+                    QMessageBox.warning(window, "No area selected",
+                                        "Please select a source window first.")
+                    return
+                ocr_trigger.set()
+            window.recapture_requested.connect(_on_recapture)
             ref_frame: np.ndarray | None = None
             _capture_gen = 0  # incremented on each OCR trigger; stale results discarded
 
@@ -580,7 +586,10 @@ if __name__ == "__main__":
     gui_mode = args.hwnd is None
 
     # QApplication is always needed for the picker dialog (and preview in GUI mode)
-    from PyQt6.QtWidgets import QApplication
+    try:
+        from PyQt6.QtWidgets import QApplication, QMessageBox
+    except ImportError:
+        from PyQt5.QtWidgets import QApplication, QMessageBox
     app = QApplication.instance() or QApplication(sys.argv)
 
     # Resolve HWND: --hwnd flag or GUI picker dialog
@@ -609,6 +618,8 @@ if __name__ == "__main__":
         window = MainWindow()
         window.set_status("—", 0.0, 0.0, window_title or hex(hwnd))
         window.show()
+        if hwnd is not None:
+            window.controls_bar.set_streaming(True)
     else:
         window = None
 

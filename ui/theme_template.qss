@@ -1,0 +1,96 @@
+/* ===== Global ===== */
+* {
+    background-color: {BG};
+    color: {TEXT};
+    font-family: "Segoe UI", sans-serif;
+}
+
+/* ===== Panels ===== */
+QWidget#SideMenu,
+QWidget#HistorySidebar,
+QWidget#StatusBar,
+QWidget#PreviewWidget,
+QWidget#TranscriptionTray {
+    background-color: {PANEL};
+    border: 1px solid {BORDER};
+}
+
+/* ===== Labels ===== */
+QLabel {
+    color: {TEXT};
+}
+
+QLabel[dim="true"] {
+    color: {TEXT_DIM};
+}
+
+QLabel[secondary="true"] {
+    color: {TEXT_SECONDARY};
+}
+
+/* ===== Universal Buttons ===== */
+QPushButton, QToolButton, QWidget[role="button"] {
+    background-color: {PANEL};
+    border: 1px solid {BORDER};
+    border-radius: 6px;
+    padding: 6px 10px;
+}
+
+QPushButton:hover, QToolButton:hover, QWidget[role="button"]:hover {
+    border-color: {ACCENT};
+}
+
+QPushButton:pressed, QToolButton:pressed, QWidget[role="button"]:pressed {
+    background-color: {ACCENT_GLOW};
+}
+
+QPushButton[selected="true"], QToolButton[selected="true"], QWidget[role="button"][selected="true"] {
+    background-color: {ACCENT};
+    color: white;
+    border-color: {ACCENT};
+}
+
+/* ===== Checkboxes ===== */
+QCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    border: 1px solid {BORDER};
+    background: {PANEL};
+}
+
+QCheckBox::indicator:checked {
+    background: {ACCENT};
+    border-color: {ACCENT};
+}
+
+/* ===== Sliders ===== */
+QSlider::groove:horizontal {
+    height: 6px;
+    background: {BORDER};
+    border-radius: 3px;
+}
+
+QSlider::handle:horizontal {
+    width: 16px;
+    height: 16px;
+    margin: -5px 0;
+    border-radius: 8px;
+    background: {ACCENT};
+}
+
+/* ===== Scrollbars ===== */
+QScrollBar:vertical {
+    background: {PANEL};
+    width: 10px;
+}
+
+QScrollBar::handle:vertical {
+    background: {ACCENT};
+    border-radius: 4px;
+}
+
+QScrollBar::add-line,
+QScrollBar::sub-line {
+    height: 0;
+}
