@@ -14,6 +14,7 @@ import cv2
 import numpy as np
 
 from tts.manager import TTSManager
+from tts.openjtalk_backend import OpenJTalkBackend
 from tts.voicevox_backend import VoiceVoxBackend
 
 DIFF_THRESHOLD = 8.0
@@ -453,10 +454,12 @@ async def main(
             # Wire re-capture button in tray to force immediate OCR
             tray.recapture_requested.connect(lambda: ocr_trigger.set())
 
-            # TTS manager (VoiceVox placeholder — pyttsx3 removed)
+            # TTS manager (OpenJTalk active, VoiceVox fallback)
             tts = TTSManager([
+                OpenJTalkBackend(),
                 VoiceVoxBackend(),
             ])
+            tts.set_backend("coeiroink")
             tray.tts_requested.connect(tts.speak)
             sidebar.tts_requested.connect(tts.speak)
 
