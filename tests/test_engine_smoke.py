@@ -28,8 +28,8 @@ async def _run_smoke(engine_id: str) -> int:
     manager = EngineManager(
         "models/paddle",
         {
-            "det": "PP-OCRv5_server_det_infer.onnx",
-            "rec": "PP-OCRv5_server_rec_infer.onnx",
+            "det": "det.onnx",
+            "rec": "rec.onnx",
             "dict": "japan_dict.txt",
         },
     )

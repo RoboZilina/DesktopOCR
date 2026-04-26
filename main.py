@@ -95,10 +95,11 @@ def parse_args():
     parser.add_argument("--region", type=str, help="Capture region as x,y,w,h")
     parser.add_argument("--select-region", action="store_true", help="Interactively select capture region on first frame")
     parser.add_argument("--models-dir", type=str, default="models/paddle", help="Directory containing OCR model files")
-    parser.add_argument("--det-model", type=str, default="PP-OCRv5_server_det_infer.onnx", help="Detection ONNX filename")
-    parser.add_argument("--rec-model", type=str, default="PP-OCRv5_server_rec_infer.onnx", help="Recognition ONNX filename")
+    parser.add_argument("--det-model", type=str, default="det.onnx", help="Detection ONNX filename")
+    parser.add_argument("--rec-model", type=str, default="rec.onnx", help="Recognition ONNX filename")
     parser.add_argument("--dict-file", type=str, default="japan_dict.txt", help="Dictionary filename")
     parser.add_argument("--debug-ocr", action="store_true", help="Enable DEBUG logging for OCR engine and box filtering")
+    parser.add_argument("--no-gui", action="store_true", help="Run in headless mode without the PyQt6 window")
     return parser.parse_args()
 
 
@@ -777,7 +778,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Determine mode: GUI mode when --hwnd is NOT provided
-    gui_mode = args.hwnd is None
+    gui_mode = not args.no_gui
 
     # QApplication is always needed for the picker dialog (and preview in GUI mode)
     try:

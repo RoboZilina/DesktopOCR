@@ -453,6 +453,9 @@ class EngineManager:
         texts: list[str] = []
         confidences: list[float] = []
 
+        import os
+        _REC_MIN_CONF = float(os.getenv("DESKTOCR_REC_MIN_CONF", "0.50"))
+
         for box in boxes:
             if expand_for_recognition:
                 norm = self._normalize_box(box, w, h)
@@ -499,6 +502,7 @@ class EngineManager:
             res = await self._current_instance.recognize(crop)
             text = res.get("text", "").strip()
             conf = float(res.get("confidence", 0.0) or 0.0)
+            logger.debug("[RecResult] text='%s' conf=%.2f", text, conf)
             if text:
                 texts.append(text)
                 confidences.append(conf)
