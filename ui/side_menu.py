@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSlider, QFrame, QSizePolicy,
+    QPushButton, QSlider, QFrame, QSizePolicy, QLineEdit, QScrollArea,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ui.theme import ThemePalette, DARK, LIGHT
@@ -20,6 +20,12 @@ class SideMenu(QWidget):
     text_size_changed        = pyqtSignal(str)
     tray_height_changed      = pyqtSignal(str)
     theme_changed            = pyqtSignal(str)  # "auto" | "dark" | "light"
+    translation_enabled_changed  = pyqtSignal(bool)
+    translation_backend_changed  = pyqtSignal(str)  # "auto" | "deepl" | "libre"
+    libre_url_changed            = pyqtSignal(str)
+    openai_validator_enabled_changed = pyqtSignal(bool)
+    openai_api_key_changed       = pyqtSignal(str)
+    openai_model_changed         = pyqtSignal(str)
     reset_requested          = pyqtSignal()
     unload_engines_requested = pyqtSignal()
     hide_requested           = pyqtSignal()
@@ -31,8 +37,26 @@ class SideMenu(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
 
-        # Main layout
-        layout = QVBoxLayout(self)
+        # Outer layout: just holds the scroll area
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Scroll area fills the full height of the panel
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer.addWidget(self._scroll)
+
+        # Content widget inside scroll area
+        content = QWidget()
+        content.setObjectName("SideMenuContent")
+        self._scroll.setWidget(content)
+
+        # All items go into this layout
+        layout = QVBoxLayout(content)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
 
@@ -71,6 +95,72 @@ class SideMenu(QWidget):
                                  self.preview_visible_changed, default=True)
         self._add_toggle_section(layout, "VN Text Cleaner",
                                  self.vn_cleaner_changed, default=True)
+
+        # --- Translation section ---
+        layout.addWidget(self._divider())
+        layout.addWidget(QLabel("Translation"))
+        self._add_toggle_section(
+            layout, "Enable Translation",
+            self.translation_enabled_changed, default=True
+        )
+
+        layout.addWidget(QLabel("Backend"))
+        backend_row = QHBoxLayout()
+        self._backend_btns: dict[str, QPushButton] = {}
+        for label, bid in [("Auto", "auto"), ("DeepL", "deepl"), ("Google", "google")]:
+            btn = QPushButton(label)
+            btn.setProperty("menuClass", "option-btn")
+            btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setMinimumWidth(0)
+            btn.setMaximumWidth(16777215)
+            btn.clicked.connect(
+                lambda _checked, b=bid: self._on_translation_backend_clicked(b)
+            )
+            backend_row.addWidget(btn)
+            self._backend_btns[bid] = btn
+        self._backend_btns["auto"].setChecked(True)
+        backend_row.addStretch()
+        layout.addLayout(backend_row)
+
+        self._libre_url_label = QLabel("LibreTranslate URL")
+        self._libre_url_label.hide()
+        layout.addWidget(self._libre_url_label)
+        self._libre_url_edit = QLineEdit("http://localhost:5000")
+        self._libre_url_edit.hide()
+        self._libre_url_edit.setPlaceholderText("http://localhost:5000")
+        self._libre_url_edit.editingFinished.connect(
+            lambda: self.libre_url_changed.emit(self._libre_url_edit.text().strip())
+        )
+        layout.addWidget(self._libre_url_edit)
+
+        # AI Validator
+        layout.addWidget(self._divider())
+        self._add_toggle_section(
+            layout, "AI Validator",
+            self.openai_validator_enabled_changed,
+            default=False
+        )
+        
+        self._openai_api_key_edit = QLineEdit()
+        self._openai_api_key_edit.setPlaceholderText("sk-...")
+        self._openai_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._openai_api_key_edit.editingFinished.connect(
+            lambda: self.openai_api_key_changed.emit(self._openai_api_key_edit.text().strip())
+        )
+        layout.addWidget(QLabel("OpenAI API Key"))
+        layout.addWidget(self._openai_api_key_edit)
+        
+        from PyQt6.QtWidgets import QComboBox
+        self._openai_model_combo = QComboBox()
+        self._openai_model_combo.addItems(["gpt-4o-mini", "gpt-4o"])
+        self._openai_model_combo.currentTextChanged.connect(self.openai_model_changed.emit)
+        layout.addWidget(QLabel("OpenAI Model"))
+        layout.addWidget(self._openai_model_combo)
+        
+        self._openai_usage_label = QLabel("Session usage: 0 chars")
+        self._openai_usage_label.setStyleSheet("color: #888888; font-size: 11px;")
+        layout.addWidget(self._openai_usage_label)
 
         # Diff threshold slider
         layout.addWidget(self._divider())
@@ -151,72 +241,122 @@ class SideMenu(QWidget):
 
     def _apply_base_style(self):
         pal = getattr(self, '_pal', None)
+        is_dark = not pal or pal.is_dark
         bg = pal.panel if pal else "#0d0d10"
         border = pal.border if pal else "#1f1f23"
+        text = pal.text if pal else "#ffffff"
         text_dim = pal.text_dim if pal else "#8a8a93"
         accent = pal.accent if pal else "#10b981"
-        btn_bg = "#1a1a1f" if (not pal or pal.is_dark) else "#f1f5f9"
-        btn_border = "#2a2a2f" if (not pal or pal.is_dark) else "#cbd5e1"
-        btn_hover = "#3a3a3f" if (not pal or pal.is_dark) else "#94a3b8"
-        groove = "#2a2a2f" if (not pal or pal.is_dark) else "#e2e8f0"
-        checked_fg = "#000000" if (not pal or pal.is_dark) else "#ffffff"
-        hover_bg = "rgba(255,255,255,0.05)" if (not pal or pal.is_dark) else "rgba(0,0,0,0.05)"
-        self.setStyleSheet(
-            f"""
+        btn_bg = "#1a1a1f" if is_dark else "#f1f5f9"
+        btn_border = "#2a2a2f" if is_dark else "#cbd5e1"
+        btn_hover_border = "#3a3a3f" if is_dark else "#94a3b8"
+        btn_hover_bg = "rgba(255,255,255,0.08)" if is_dark else "rgba(0,0,0,0.06)"
+        groove = "#2a2a2f" if is_dark else "#e2e8f0"
+        panel_bg = (
+            f"qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {bg}, stop:1 {border})"
+            if is_dark else bg
+        )
+        self.setStyleSheet(f"""
             #SideMenu {{
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 {bg}, stop:1 {border});
+                background: {panel_bg};
                 border-right: 1px solid {border};
             }}
-            """ if (pal and pal.is_dark) else f"""
-            #SideMenu {{
-                background: {bg};
-                border-right: 1px solid {border};
-            }}
-            """
-            + f"""
-            QLabel {{ color: {text_dim}; font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 10px; margin-bottom: 4px; }}
-            QLabel[class="section-header"] {{
+
+            /* Scope all descendants to beat the global * rule */
+            #SideMenu QLabel {{
+                background: transparent;
                 color: {text_dim};
-                font-size: 13px;
+                font-size: 12px;
                 font-weight: 700;
-                text-transform: uppercase;
                 letter-spacing: 0.5px;
-                margin-top: 10px;
-                margin-bottom: 4px;
+                margin-top: 8px;
+                margin-bottom: 2px;
             }}
-            QPushButton[menuClass="option-btn"] {{
+
+            #SideMenu QPushButton[menuClass="option-btn"] {{
                 background: {btn_bg};
-                color: {text_dim};
+                color: {text};
                 border: 1px solid {btn_border};
-                border-radius: 10px;
-                padding: 8px 18px;
-                font-size: 15px;
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 13px;
                 font-weight: 600;
             }}
-            QPushButton[menuClass="option-btn"]:checked {{
+            #SideMenu QPushButton[menuClass="option-btn"]:checked {{
                 background: {accent};
-                color: {checked_fg};
+                color: #ffffff;
                 border-color: {accent};
             }}
-            QPushButton[menuClass="option-btn"]:hover {{
-                border-color: {btn_hover};
-                background: {hover_bg};
+            #SideMenu QPushButton[menuClass="option-btn"]:hover:!checked {{
+                border-color: {btn_hover_border};
+                background: {btn_hover_bg};
             }}
-            QSlider::groove:horizontal {{
+
+            #SideMenu QPushButton:not([menuClass]) {{
+                background: {btn_bg};
+                color: {text};
+                border: 1px solid {btn_border};
+                border-radius: 8px;
+                padding: 6px 12px;
+                font-size: 13px;
+            }}
+            #SideMenu QPushButton:not([menuClass]):hover {{
+                border-color: {accent};
+            }}
+
+            #SideMenu QSlider::groove:horizontal {{
                 background: {groove};
                 height: 5px;
                 border-radius: 3px;
             }}
-            QSlider::handle:horizontal {{
+            #SideMenu QSlider::handle:horizontal {{
                 background: {accent};
-                width: 18px;
-                height: 18px;
-                border-radius: 9px;
-                margin: -7px 0;
+                width: 16px;
+                height: 16px;
+                border-radius: 8px;
+                margin: -6px 0;
             }}
-            """
-        )
+
+            #SideMenu QLineEdit {{
+                background: {btn_bg};
+                color: {text_dim};
+                border: 1px solid {btn_border};
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }}
+
+            /* Scroll area transparency - let SideMenu gradient show through */
+            #SideMenu QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            #SideMenu QScrollArea > QWidget > QWidget {{
+                background: transparent;
+            }}
+            #SideMenuContent {{
+                background: transparent;
+            }}
+
+            /* Slim themed scrollbar */
+            #SideMenu QScrollBar:vertical {{
+                background: transparent;
+                width: 6px;
+                margin: 0;
+            }}
+            #SideMenu QScrollBar::handle:vertical {{
+                background: {btn_border};
+                border-radius: 3px;
+                min-height: 30px;
+            }}
+            #SideMenu QScrollBar::handle:vertical:hover {{
+                background: {accent};
+            }}
+            #SideMenu QScrollBar::add-line:vertical,
+            #SideMenu QScrollBar::sub-line:vertical {{
+                height: 0;
+            }}
+        """)
 
     def _on_text_size_clicked(self, size_id: str):
         for sid, btn in self._size_btns.items():
@@ -244,12 +384,16 @@ class SideMenu(QWidget):
     def set_theme(self, pal: ThemePalette):
         self._pal = pal
         self._apply_base_style()
-        # Update header label
+        # Header gets full brightness text; override the dimmed QLabel rule
         self._header.setStyleSheet(
-            f"color: {pal.text}; font-size: 18px; font-weight: 800; letter-spacing: 1px;"
+            f"color: {pal.text}; font-size: 18px; font-weight: 800; "
+            f"letter-spacing: 1px; background: transparent; margin-top: 0;"
         )
-        # Update reset button color
-        self._reset_btn.setStyleSheet(f"color: {pal.panic};")
+        # Reset button gets panic color
+        self._reset_btn.setStyleSheet(
+            f"color: {pal.panic}; background: transparent; "
+            f"border: 1px solid {pal.panic}; border-radius: 8px;"
+        )
 
     def _on_reset(self):
         # Reset toggles to their defaults
@@ -305,3 +449,16 @@ class SideMenu(QWidget):
         row.addWidget(off_btn)
         row.addStretch()
         layout.addLayout(row)
+
+    def _on_translation_backend_clicked(self, backend_id: str) -> None:
+        """Update backend button selection and show/hide URL field."""
+        for bid, btn in self._backend_btns.items():
+            btn.setChecked(bid == backend_id)
+        # LibreTranslate is hidden for now, so URL field is always hidden
+        url_visible = False
+        self._libre_url_label.setVisible(url_visible)
+        self._libre_url_edit.setVisible(url_visible)
+        self.translation_backend_changed.emit(backend_id)
+
+    def update_openai_usage(self, chars: int) -> None:
+        self._openai_usage_label.setText(f"Session usage: {chars} chars")

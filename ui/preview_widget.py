@@ -66,7 +66,7 @@ class PreviewWidget(QWidget):
         self._overlay = SelectionOverlay(self._get_frame_size, self)
         self._overlay.setGeometry(self._label.geometry())
         self._overlay.raise_()  # ensure overlay is painted on top
-        self._overlay.selection_changed.connect(self._on_selection_changed)
+        self._overlay.region_changed.connect(self._on_selection_changed)
 
         # Timer: poll deque at 50ms (~20 fps)
         self._timer = QTimer(self)
@@ -150,9 +150,8 @@ class PreviewWidget(QWidget):
             f"background-color: {bg}; color: {fg}; font-size: 16px;"
         )
 
-    def _on_selection_changed(self):
-        rect = self._overlay.selected_rect
-        if rect is not None and not rect.isEmpty():
+    def _on_selection_changed(self, nx: float, ny: float, nw: float, nh: float) -> None:
+        if nw > 0 and nh > 0:
             self._hint_label.hide()
 
     def _update_hint_style(self):

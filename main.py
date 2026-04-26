@@ -15,11 +15,33 @@ import numpy as np
 
 from tts.manager import TTSManager
 from tts.openjtalk_backend import OpenJTalkBackend
-from tts.voicevox_backend import VoiceVoxBackend
+from tts.edge_tts_backend import EdgeTTSBackend
 
 DIFF_THRESHOLD = 8.0
 PREVIEW_INTERVAL = 0.25
 STABILIZE_DELAY = 0.5
+
+DEFAULT_SETTINGS = {
+    "ocr_engine": "server",
+    "preprocessing_enabled": False,
+    "auto_capture": True,
+    "auto_copy": True,
+    "upscale_factor": 2.0,
+    "history_visible": True,
+    "text_size": "standard",
+    "tts_enabled": False,
+    "confidence_threshold": 0.75,
+    "poll_interval_ms": 500,
+    "stabilize_wait_ms": 800,
+    # Translation settings
+    "translation_enabled": True,
+    "translation_backend": "auto",  # "auto" | "deepl" | "libre"
+    "libre_translate_url": "http://localhost:5000",
+    # OpenAI settings
+    "openai_validator_enabled": False,
+    "openai_api_key": "",
+    "openai_model": "gpt-4o-mini",
+}
 
 def _compute_diff(frame: np.ndarray, ref: np.ndarray | None) -> float:
     """Return mean absolute pixel difference between two BGR frames."""
@@ -44,6 +66,7 @@ from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
 from core.capture_pipeline import CapturePipeline
 from core.tensor_utils import preprocess_paddle_slice
+from logic.openai_validator import OpenAIValidator
 
 
 
@@ -209,7 +232,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
     capture.set_region(*selected_region)
   
     
-    pipeline = CapturePipeline(engine_manager, capture)
+    openai_validator = OpenAIValidator(
+        api_key=DEFAULT_SETTINGS.get("openai_api_key", ""),
+        model=DEFAULT_SETTINGS.get("openai_model", "gpt-4o-mini")
+    )
+    openai_validator.set_enabled(DEFAULT_SETTINGS.get("openai_validator_enabled", False))
+    
+    pipeline = CapturePipeline(engine_manager, capture, openai_validator)
 
     try:
         logger.info("Loading engine: %s ...", args.engine)
@@ -229,11 +258,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 lambda eid: asyncio.ensure_future(_on_engine_changed(eid))
             )
 
-            # Stub translate handler — print to terminal for now
-            def _on_translate_requested(text: str):
-                print(f"[Translate stub] {text}")
-
-            window.translate_requested.connect(_on_translate_requested)
+            # Translation is handled by MainWindow._on_translate_requested
+            # (wired in MainWindow.__init__) — no stub needed here.
 
         if args.debug_once:
             logger.info("Running one-shot OCR debug pass...")
@@ -357,6 +383,18 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.side_menu.diff_threshold_changed.connect(
                 lambda v: settings.__setitem__("diff_threshold", v)
             )
+            
+            # OpenAI Validator Settings
+            window.side_menu.openai_validator_enabled_changed.connect(
+                openai_validator.set_enabled
+            )
+            def _on_openai_api_key_changed(key: str):
+                openai_validator.api_key = key
+            window.side_menu.openai_api_key_changed.connect(_on_openai_api_key_changed)
+            def _on_openai_model_changed(model: str):
+                openai_validator._model = model
+            window.side_menu.openai_model_changed.connect(_on_openai_model_changed)
+            
             window.side_menu.reset_requested.connect(
                 lambda: [
                     settings.update({"auto_capture": True, "auto_copy": False, "vn_cleaner": True, "diff_threshold": 8.0}),
@@ -367,12 +405,11 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 ]
             )
 
-            # TTS manager (OpenJTalk active, VoiceVox fallback)
+            # TTS manager (Edge TTS active, OpenJTalk fallback)
             tts = TTSManager([
+                EdgeTTSBackend(),
                 OpenJTalkBackend(),
-                VoiceVoxBackend(),
             ])
-            tts.set_backend("coeiroink")
             window.tts_requested.connect(tts.speak)
 
             # Populate voice selector from TTS backend
@@ -453,6 +490,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         if settings["auto_copy"] and text:
                             from PyQt6.QtWidgets import QApplication
                             QApplication.clipboard().setText(text)
+                            
+                        window.side_menu.update_openai_usage(openai_validator.cost_estimate_chars)
 
                     await asyncio.sleep(1.5)
 

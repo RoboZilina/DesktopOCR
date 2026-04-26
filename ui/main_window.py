@@ -1,5 +1,7 @@
 """Main application window — assembles all UI components."""
 
+import asyncio
+import logging
 from collections import deque
 import numpy as np
 
@@ -13,6 +15,11 @@ from ui.transcription_tray import TranscriptionTray
 from ui.history_sidebar import HistorySidebar
 from ui.side_menu import SideMenu
 from ui.components import StatusBar
+from core.translation.manager import TranslationManager
+from core.translation.deepl_backend import DeepLBackend
+from core.translation.google_backend import GoogleTranslateBackend
+
+_logger = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -75,8 +82,35 @@ class MainWindow(QMainWindow):
         self.transcription_tray.tts_requested.connect(self.tts_requested.emit)
         self.history_sidebar.tts_requested.connect(self.tts_requested.emit)
         self.history_sidebar.translate_requested.connect(self.translate_requested.emit)
+        # Wire tray translate button → MainWindow.translate_requested
+        self.transcription_tray.translate_requested.connect(self.translate_requested.emit)
         self.side_menu.theme_changed.connect(self._apply_theme)
         self.side_menu.hide_requested.connect(self.side_menu.hide)
+
+        # Translation manager — DeepL primary, Google fallback
+        self._libre_url = "http://localhost:5000"
+        self._translation_manager = TranslationManager([
+            DeepLBackend(),
+            GoogleTranslateBackend(),
+        ])
+
+        # Wire translate_requested → async handler
+        self.translate_requested.connect(
+            lambda text: asyncio.create_task(
+                self._on_translate_requested(text)
+            )
+        )
+
+        # Wire SideMenu translation signals
+        self.side_menu.translation_enabled_changed.connect(
+            self._on_translation_enabled_changed
+        )
+        self.side_menu.translation_backend_changed.connect(
+            self._on_translation_backend_changed
+        )
+        self.side_menu.libre_url_changed.connect(
+            self._on_libre_url_changed
+        )
 
         # Detect and apply system theme on startup
         self._detect_and_apply_theme()
@@ -126,11 +160,13 @@ class MainWindow(QMainWindow):
         if not self.side_menu.isVisible():
             return
         bar_height = self.menuWidget().height() if self.menuWidget() else 48
+        available_h = self.centralWidget().height()
+        # Side menu fills the full available height — scroll area handles overflow
         self.side_menu.setGeometry(
             0,
             bar_height,
             self.side_menu.width(),
-            self.centralWidget().height(),
+            available_h,
         )
 
     def resizeEvent(self, event):
@@ -152,3 +188,73 @@ class MainWindow(QMainWindow):
         self.status_bar.set_fps(fps)
         self.status_bar.set_confidence(conf)
         self.status_bar.set_window_title(window_title)
+
+    # --- Translation ---
+
+    async def _on_translate_requested(self, text: str) -> None:
+        """Async handler: translate text and update the tray."""
+        if not text or not text.strip():
+            return
+
+        self.transcription_tray.set_translating(True)
+        try:
+            result = await self._translation_manager.translate(text)
+        except Exception as exc:  # noqa: BLE001 — belt-and-suspenders
+            _logger.error("[MainWindow] Translation raised unexpectedly: %s", exc)
+            result = ""
+
+        if result:
+            self.transcription_tray.set_translation(result)
+            self.transcription_tray.set_translating(False)
+        else:
+            self.transcription_tray.set_translation_error(
+                "Translation failed — check internet connection or "
+                "start LibreTranslate locally."
+            )
+            self.transcription_tray.set_translating(False)
+
+    def check_translation_backends(self) -> None:
+        """Fire an async availability check and log results (no UI update)."""
+        asyncio.create_task(self._check_backends_async())
+
+    async def _check_backends_async(self) -> None:
+        availability = await self._translation_manager.check_availability()
+        parts = ", ".join(
+            f"{name}={'True' if ok else 'False'}"
+            for name, ok in availability.items()
+        )
+        _logger.info("Translation backends: %s", parts)
+
+    # --- SideMenu translation signal handlers ---
+
+    def _on_translation_enabled_changed(self, enabled: bool) -> None:
+        """Enable/disable the translate button in the tray."""
+        self.transcription_tray._translate_btn.setEnabled(enabled)
+
+    def _rebuild_translation_manager(self) -> None:
+        """Rebuild the manager based on current backend setting."""
+        backend_id = getattr(self, '_translation_backend', 'auto')
+        url = self._libre_url
+        if backend_id == "deepl":
+            backends = [DeepLBackend()]
+        elif backend_id == "google":
+            backends = [GoogleTranslateBackend()]
+        else:  # "auto"
+            backends = [DeepLBackend(), GoogleTranslateBackend()]
+        self._translation_manager = TranslationManager(backends)
+        _logger.info(
+            "[MainWindow] Translation manager rebuilt: backend=%s",
+            backend_id,
+        )
+
+    def _on_translation_backend_changed(self, backend_id: str) -> None:
+        """Rebuild manager with the selected backend(s)."""
+        self._translation_backend = backend_id
+        self._rebuild_translation_manager()
+
+    def _on_libre_url_changed(self, url: str) -> None:
+        """Store new URL and rebuild manager if libre is involved."""
+        self._libre_url = url or "http://localhost:5000"
+        backend_id = getattr(self, '_translation_backend', 'auto')
+        if backend_id in ("auto", "libre"):
+            self._rebuild_translation_manager()

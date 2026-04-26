@@ -10,9 +10,10 @@ from logic.validator import score_japanese_density
 logger = logging.getLogger(__name__)
 
 class CapturePipeline:
-    def __init__(self, engine_manager: EngineManager, capture: ScreenCapture):
+    def __init__(self, engine_manager: EngineManager, capture: ScreenCapture, openai_validator=None):
         self.engine_manager = engine_manager
         self.capture = capture
+        self._openai_validator = openai_validator
         
         self.capture_generation = 0
         self.is_processing = False
@@ -56,6 +57,11 @@ class CapturePipeline:
                 return None
                 
             text = (res.get("text", "") or "").strip()
+            
+            if text and self._openai_validator and await self._openai_validator.is_available():
+                text = await self._openai_validator.validate_and_fix(text)
+                res["text"] = text  # Update the result dict so meta is consistent
+                
             conf = res.get("confidence")
             meta = res.get("meta", {}) if isinstance(res, dict) else {}
             self._update_stats(meta)

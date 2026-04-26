@@ -12,6 +12,7 @@ onnxruntime-directml==1.24.4
 # UI / async integration
 PyQt6==6.11.0
 qasync==0.28.0
+aiohttp==3.9.5
 
 # Desktop UX helpers
 pyperclip==1.11.0

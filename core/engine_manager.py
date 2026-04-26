@@ -14,7 +14,7 @@ from core.tensor_utils import (
     preprocess_paddle_slice,
     preprocess_natural_slice,
 )
-from logic.validator import clean_ocr_output, is_valid_japanese, score_japanese_density
+from logic.validator import clean_ocr_output, clean_ocr_output_enhanced, is_valid_japanese, score_japanese_density
 
 logger = logging.getLogger(__name__)
 
@@ -285,7 +285,7 @@ class EngineManager:
         if _validator_disabled():
             return text, {"validator": {"enabled": False, "changed": False, "valid_hint": True, "jp_chars": int(score_japanese_density(text))}}
 
-        cleaned = clean_ocr_output(text)
+        cleaned = clean_ocr_output_enhanced(text)
         out_text = cleaned if cleaned else text
         changed = out_text != text
         jp_chars = int(score_japanese_density(out_text))

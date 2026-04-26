@@ -212,5 +212,37 @@ class TranscriptionTray(QWidget):
     def set_selection_translation(self, text: str):
         self._sel_text.setPlainText(text)
 
+    def set_translating(self, busy: bool) -> None:
+        """Toggle translate button loading state."""
+        if busy:
+            self._translate_btn.setEnabled(False)
+            self._translate_btn.setText("Translating...")
+        else:
+            self._translate_btn.setEnabled(True)
+            self._translate_btn.setText("\U0001f310 Translate")
+
+    def set_translation_error(self, message: str) -> None:
+        """Display error message in the translation area with panic color."""
+        pal = getattr(self, '_pal', None)
+        error_color = pal.panic if pal else "#ef4444"
+        self._trans_text.setPlainText(message)
+        # Temporarily apply error text color
+        current_style = self._trans_text.styleSheet()
+        size = FONT_SIZES.get(
+            getattr(self, '_current_font_size', 'medium'), 18
+        )
+        bg = pal.bg if pal else "#050506"
+        border = pal.border if pal else "#1f1f23"
+        self._trans_text.setStyleSheet(f"""
+            QTextEdit {{
+                background: {bg};
+                color: {error_color};
+                border: 1px solid {error_color};
+                border-radius: 6px;
+                font-size: {size}px;
+                padding: 6px;
+            }}
+        """)
+
     def get_ocr_text(self) -> str:
         return self._ocr_text.toPlainText()

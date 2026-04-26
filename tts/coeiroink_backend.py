@@ -44,9 +44,9 @@ class COEIROINKBackend(TTSBackend):
                     sid = str(style.get("styleId", "0"))
                     style_name = style_map.get(sid, style.get("styleName", sid))
                     voices.append((f"{name} ({style_name})", sid))
-            return voices or [("Tsukuyomi-chan (Calm)", "0")]
+            return voices
         except Exception:
-            return [("Tsukuyomi-chan (Calm)", "0")]
+            return []
 
     def set_voice(self, voice_id):
         print(f"[COEIROINK] Voice style set to: {voice_id}")
