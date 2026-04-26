@@ -14,6 +14,37 @@ from typing import Optional, Tuple
 
 import numpy as np
 
+
+class GUID(ctypes.Structure):
+    _fields_ = [
+        ("Data1", ctypes.c_uint32),
+        ("Data2", ctypes.c_uint16),
+        ("Data3", ctypes.c_uint16),
+        ("Data4", ctypes.c_uint8 * 8),
+    ]
+
+
+QueryInterfaceFunc = ctypes.WINFUNCTYPE(
+    ctypes.c_long,
+    ctypes.c_void_p,
+    ctypes.POINTER(GUID),
+    ctypes.POINTER(ctypes.c_void_p),
+)
+AddRefFunc = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
+ReleaseFunc = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)
+
+
+class IUnknownVTable(ctypes.Structure):
+    _fields_ = [
+        ("QueryInterface", QueryInterfaceFunc),
+        ("AddRef", AddRefFunc),
+        ("Release", ReleaseFunc),
+    ]
+
+
+class IUnknown(ctypes.Structure):
+    _fields_ = [("lpVtbl", ctypes.POINTER(IUnknownVTable))]
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -75,6 +106,17 @@ def _create_d3d11_device() -> object:
     if hr != 0:
         raise RuntimeError(f"D3D11CreateDevice failed: HRESULT=0x{hr & 0xFFFFFFFF:08X}")
 
+    # Query the IDXGIDevice interface from the ID3D11Device
+    dxgi_device_ptr = ctypes.c_void_p()
+    iid_dxgi = _iid_to_guid(IID_IDXGIDevice)
+    device_iface = ctypes.cast(p_device, ctypes.POINTER(IUnknown))
+    qi = device_iface.contents.lpVtbl.contents.QueryInterface
+    hr = qi(device_iface, ctypes.byref(iid_dxgi), ctypes.byref(dxgi_device_ptr))
+    if hr != 0:
+        raise RuntimeError(
+            f"QueryInterface(IDXGIDevice) failed: HRESULT=0x{hr & 0xFFFFFFFF:08X}"
+        )
+
     # winsdk 1.0.0b10 removed the python interop helper module
     # winsdk.windows.graphics.directx.direct3d11.interop.
     # Bridge manually via Win32 API and wrap with IDirect3DDevice._from.
@@ -85,11 +127,15 @@ def _create_d3d11_device() -> object:
     create_from_dxgi.restype = ctypes.c_long
 
     inspectable = ctypes.c_void_p()
-    hr = create_from_dxgi(p_device, ctypes.byref(inspectable))
+    hr = create_from_dxgi(dxgi_device_ptr, ctypes.byref(inspectable))
     if hr != 0:
         raise RuntimeError(
             f"CreateDirect3D11DeviceFromDXGIDevice failed: HRESULT=0x{hr & 0xFFFFFFFF:08X}"
         )
+
+    # Release temporary DXGI device reference
+    dxgi_unknown = ctypes.cast(dxgi_device_ptr, ctypes.POINTER(IUnknown))
+    dxgi_unknown.contents.lpVtbl.contents.Release(dxgi_unknown)
 
     from winsdk.windows.graphics.directx.direct3d11 import (  # noqa: PLC0415
         IDirect3DDevice,
@@ -108,6 +154,15 @@ def _iid_to_bytes(iid_str: str) -> list[int]:
     p3 = int(parts[2], 16).to_bytes(2, "little")
     p4 = bytes.fromhex(parts[3] + parts[4])
     return list(p1 + p2 + p3 + p4)
+
+
+def _iid_to_guid(iid_str: str) -> GUID:
+    bytes_le = _iid_to_bytes(iid_str)
+    data1 = int.from_bytes(bytes(bytes_le[0:4]), "little", signed=False)
+    data2 = int.from_bytes(bytes(bytes_le[4:6]), "little", signed=False)
+    data3 = int.from_bytes(bytes(bytes_le[6:8]), "little", signed=False)
+    data4 = (ctypes.c_uint8 * 8)(*bytes_le[8:])
+    return GUID(data1, data2, data3, data4)
 
 
 # ---------------------------------------------------------------------------

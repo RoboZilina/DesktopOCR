@@ -50,16 +50,19 @@ class PreviewWidget(QWidget):
         )
         layout.addWidget(self._label)
 
-        self._hint_label = QLabel(
+        self._hint_message = (
             "Click and drag on the preview to select a text region. "
             "Keep the selection tight around the text to prevent ghost characters."
         )
+        self._hint_label = QLabel(self._hint_message)
         self._hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._hint_label.setWordWrap(True)
         self._hint_label.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Fixed,
         )
+        self._hint_label.setMinimumHeight(32)
+        self._hint_dismissed = False
         layout.addWidget(self._hint_label)
 
         # Overlay for click-and-drag region selection
@@ -137,6 +140,14 @@ class PreviewWidget(QWidget):
     def latest_frame(self) -> np.ndarray | None:
         return self._last_frame
 
+    def clear_frame(self, placeholder: str | None = None, *, clear_selection: bool = False):
+        """Reset the preview to a placeholder message and optionally clear selection."""
+        self._last_frame = None
+        self._label.clear()
+        self._label.setText(placeholder or "No feed")
+        if clear_selection and hasattr(self._overlay, "clear_selection"):
+            self._overlay.clear_selection()
+
     def set_theme(self, pal: ThemePalette):
         self._pal = pal
         self._update_label_style()
@@ -152,14 +163,28 @@ class PreviewWidget(QWidget):
 
     def _on_selection_changed(self, nx: float, ny: float, nw: float, nh: float) -> None:
         if nw > 0 and nh > 0:
-            self._hint_label.hide()
+            self._dismiss_hint()
 
     def _update_hint_style(self):
         pal = self._pal
-        fg = pal.text_dim if pal else "#888888"
+        fg = "transparent" if self._hint_dismissed else (pal.text_dim if pal else "#888888")
+        bg = "rgba(8, 8, 12, 0.45)" if pal and pal.is_dark else "rgba(240, 244, 255, 0.65)"
+        border = pal.border if pal else "#2a2a30"
         self._hint_label.setStyleSheet(
-            f"color: {fg}; font-size: 12px; padding: 4px;"
+            f"color: {fg}; font-size: 12px; padding: 6px 10px; "
+            f"border: 1px dashed {border}; border-radius: 8px; background: {bg};"
         )
+        if not self._hint_dismissed and not self._hint_label.text():
+            self._hint_label.setText(self._hint_message)
+        elif self._hint_dismissed:
+            self._hint_label.clear()
+
+    def _dismiss_hint(self):
+        if self._hint_dismissed:
+            return
+        self._hint_dismissed = True
+        self._hint_label.clear()
+        self._update_hint_style()
 
     def stop(self):
         """Stop the polling timer."""

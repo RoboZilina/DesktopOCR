@@ -72,18 +72,6 @@ class ControlsBar(QWidget):
 
         layout.addSpacing(12)
 
-        # Mode selector
-        self._mode_lbl = QLabel("Mode")
-        self._mode_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold;")
-        layout.addWidget(self._mode_lbl)
-        self._mode_combo = QComboBox()
-        self._mode_combo.addItems(["baseline-reset"])
-        self._mode_combo.setEnabled(False)
-        self._mode_combo.setStyleSheet(_combo_style(DARK))
-        layout.addWidget(self._mode_combo)
-
-        layout.addSpacing(12)
-
         # Voice selector
         self._voice_lbl = QLabel("Voice")
         self._voice_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold;")
@@ -98,17 +86,18 @@ class ControlsBar(QWidget):
 
         layout.addSpacing(12)
 
+        layout.addStretch()
+
         # Stream toggle button (green = select window, red = stop stream)
         self._stream_btn = QPushButton("Select Source Window")
         self._stream_btn.setObjectName("StreamButton")
-        self._stream_btn.setFixedHeight(32)
+        self._stream_btn.setFixedHeight(40)
+        self._stream_btn.setMinimumWidth(210)
         self._stream_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._stream_btn.clicked.connect(self._on_stream_btn_clicked)
         self._streaming = False
         self._update_stream_btn_style()
         layout.addWidget(self._stream_btn)
-
-        layout.addStretch()
 
     def _update_stream_btn_style(self):
         if self._streaming:
@@ -164,7 +153,6 @@ class ControlsBar(QWidget):
             f"background: {pal.panel}; border-bottom: 1px solid {pal.border};"
         )
         self._engine_combo.setStyleSheet(_combo_style(pal))
-        self._mode_combo.setStyleSheet(_combo_style(pal))
         self.voice_selector.setStyleSheet(_combo_style(pal))
         brand = self.findChild(QLabel, "PersonalOCR")
         if brand:
@@ -175,9 +163,6 @@ class ControlsBar(QWidget):
             f"background: none; border: none; color: {pal.text}; font-size: 14px;"
         )
         self._engine_lbl.setStyleSheet(
-            f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold;"
-        )
-        self._mode_lbl.setStyleSheet(
             f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold;"
         )
         self._voice_lbl.setStyleSheet(

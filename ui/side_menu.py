@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QSlider, QFrame, QSizePolicy, QLineEdit, QScrollArea,
+    QPushButton, QSlider, QFrame, QSizePolicy, QLineEdit, QScrollArea, QComboBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ui.theme import ThemePalette, DARK, LIGHT
@@ -13,6 +13,7 @@ class SideMenu(QWidget):
 
     auto_capture_changed     = pyqtSignal(bool)
     auto_copy_changed        = pyqtSignal(bool)
+    auto_read_selection_changed = pyqtSignal(bool)
     history_visible_changed  = pyqtSignal(bool)
     preview_visible_changed  = pyqtSignal(bool)
     vn_cleaner_changed       = pyqtSignal(bool)
@@ -22,12 +23,17 @@ class SideMenu(QWidget):
     theme_changed            = pyqtSignal(str)  # "auto" | "dark" | "light"
     translation_enabled_changed  = pyqtSignal(bool)
     translation_backend_changed  = pyqtSignal(str)  # "auto" | "deepl" | "libre"
+    auto_translate_selection_changed = pyqtSignal(bool)
     libre_url_changed            = pyqtSignal(str)
     openai_validator_enabled_changed = pyqtSignal(bool)
     openai_api_key_changed       = pyqtSignal(str)
     openai_model_changed         = pyqtSignal(str)
+    deepseek_validator_enabled_changed = pyqtSignal(bool)
+    deepseek_api_key_changed     = pyqtSignal(str)
+    deepseek_model_changed       = pyqtSignal(str)
+    google_vision_enabled_changed = pyqtSignal(bool)
+    google_vision_api_key_changed = pyqtSignal(str)
     reset_requested          = pyqtSignal()
-    unload_engines_requested = pyqtSignal()
     hide_requested           = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -36,6 +42,8 @@ class SideMenu(QWidget):
         self.setObjectName("SideMenu")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
+        self._auto_read_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._auto_translate_toggle: tuple[QPushButton, QPushButton] | None = None
 
         # Outer layout: just holds the scroll area
         outer = QVBoxLayout(self)
@@ -89,6 +97,12 @@ class SideMenu(QWidget):
                                  self.auto_capture_changed, default=True)
         self._add_toggle_section(layout, "Auto-Copy",
                                  self.auto_copy_changed, default=False)
+        self._auto_read_toggle = self._add_toggle_section(
+            layout,
+            "Auto-read Selection",
+            self.auto_read_selection_changed,
+            default=False,
+        )
         self._add_toggle_section(layout, "History Panel",
                                  self.history_visible_changed, default=True)
         self._add_toggle_section(layout, "Capture Preview",
@@ -102,6 +116,12 @@ class SideMenu(QWidget):
         self._add_toggle_section(
             layout, "Enable Translation",
             self.translation_enabled_changed, default=True
+        )
+        self._auto_translate_toggle = self._add_toggle_section(
+            layout,
+            "Auto-translate Selection",
+            self.auto_translate_selection_changed,
+            default=False,
         )
 
         layout.addWidget(QLabel("Backend"))
@@ -142,44 +162,113 @@ class SideMenu(QWidget):
             default=False
         )
         
+        self._openai_details = QWidget()
+        openai_form = QVBoxLayout(self._openai_details)
+        openai_form.setContentsMargins(0, 0, 0, 0)
+        openai_form.setSpacing(6)
+
+        openai_form.addWidget(QLabel("OpenAI API Key"))
         self._openai_api_key_edit = QLineEdit()
         self._openai_api_key_edit.setPlaceholderText("sk-...")
         self._openai_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._openai_api_key_edit.editingFinished.connect(
             lambda: self.openai_api_key_changed.emit(self._openai_api_key_edit.text().strip())
         )
-        layout.addWidget(QLabel("OpenAI API Key"))
-        layout.addWidget(self._openai_api_key_edit)
-        
-        from PyQt6.QtWidgets import QComboBox
+        openai_form.addWidget(self._openai_api_key_edit)
+
+        openai_form.addWidget(QLabel("OpenAI Model"))
         self._openai_model_combo = QComboBox()
         self._openai_model_combo.addItems(["gpt-4o-mini", "gpt-4o"])
         self._openai_model_combo.currentTextChanged.connect(self.openai_model_changed.emit)
-        layout.addWidget(QLabel("OpenAI Model"))
-        layout.addWidget(self._openai_model_combo)
-        
+        openai_form.addWidget(self._openai_model_combo)
+
         self._openai_usage_label = QLabel("Session usage: 0 chars")
         self._openai_usage_label.setStyleSheet("color: #888888; font-size: 11px;")
-        layout.addWidget(self._openai_usage_label)
+        openai_form.addWidget(self._openai_usage_label)
 
-        # Diff threshold slider
+        self._openai_details.setVisible(False)
+        self.openai_validator_enabled_changed.connect(self._openai_details.setVisible)
+        layout.addWidget(self._openai_details)
+
+        # DeepSeek Validator (Budget Mode)
         layout.addWidget(self._divider())
-        layout.addWidget(QLabel("Diff Threshold"))
-        self._threshold_label = QLabel("8")
-        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
-        self._threshold_slider.setMinimum(1)
-        self._threshold_slider.setMaximum(30)
-        self._threshold_slider.setValue(8)
-        self._threshold_slider.valueChanged.connect(
-            lambda v: (
-                self._threshold_label.setText(str(v)),
-                self.diff_threshold_changed.emit(float(v)),
+        layout.addWidget(QLabel("DeepSeek Validator (Budget Mode)"))
+        self._add_toggle_section(
+            layout,
+            "Enable DeepSeek",
+            self.deepseek_validator_enabled_changed,
+            default=False,
+        )
+        self._deepseek_details = QWidget()
+        deepseek_form = QVBoxLayout(self._deepseek_details)
+        deepseek_form.setContentsMargins(0, 0, 0, 0)
+        deepseek_form.setSpacing(6)
+
+        deepseek_desc = QLabel(
+            "Uses DeepSeek for low-cost AI cleanup. Text is sent to DeepSeek's servers."
+        )
+        deepseek_desc.setWordWrap(True)
+        deepseek_desc.setStyleSheet("color: #a0a0aa; font-size: 11px; margin-top: 0;")
+        deepseek_form.addWidget(deepseek_desc)
+
+        deepseek_form.addWidget(QLabel("DeepSeek API Key"))
+        self._deepseek_api_key_edit = QLineEdit()
+        self._deepseek_api_key_edit.setPlaceholderText("ds-...")
+        self._deepseek_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._deepseek_api_key_edit.editingFinished.connect(
+            lambda: self.deepseek_api_key_changed.emit(
+                self._deepseek_api_key_edit.text().strip()
             )
         )
-        row = QHBoxLayout()
-        row.addWidget(self._threshold_slider)
-        row.addWidget(self._threshold_label)
-        layout.addLayout(row)
+        deepseek_form.addWidget(self._deepseek_api_key_edit)
+
+        deepseek_form.addWidget(QLabel("DeepSeek Model"))
+        self._deepseek_model_combo = QComboBox()
+        self._deepseek_model_combo.addItems(["deepseek-chat"])
+        self._deepseek_model_combo.currentTextChanged.connect(
+            self.deepseek_model_changed.emit
+        )
+        deepseek_form.addWidget(self._deepseek_model_combo)
+
+        self._deepseek_details.setVisible(False)
+        self.deepseek_validator_enabled_changed.connect(self._deepseek_details.setVisible)
+        layout.addWidget(self._deepseek_details)
+
+        # Cloud OCR (Google Vision)
+        layout.addWidget(self._divider())
+        layout.addWidget(QLabel("Cloud OCR (Google Vision)"))
+        self._add_toggle_section(
+            layout,
+            "Enable Cloud OCR",
+            self.google_vision_enabled_changed,
+            default=False,
+        )
+        self._google_vision_details = QWidget()
+        cloud_form = QVBoxLayout(self._google_vision_details)
+        cloud_form.setContentsMargins(0, 0, 0, 0)
+        cloud_form.setSpacing(6)
+
+        desc = QLabel(
+            "Bring Your Own Key – data only leaves your machine when enabled."
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color: #a0a0aa; font-size: 11px; margin-top: 0;")
+        cloud_form.addWidget(desc)
+
+        cloud_form.addWidget(QLabel("Google Vision API Key"))
+        self._google_vision_key_edit = QLineEdit()
+        self._google_vision_key_edit.setPlaceholderText("AIza...")
+        self._google_vision_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._google_vision_key_edit.editingFinished.connect(
+            lambda: self.google_vision_api_key_changed.emit(
+                self._google_vision_key_edit.text().strip()
+            )
+        )
+        cloud_form.addWidget(self._google_vision_key_edit)
+
+        self._google_vision_details.setVisible(False)
+        self.google_vision_enabled_changed.connect(self._google_vision_details.setVisible)
+        layout.addWidget(self._google_vision_details)
 
         # Text size preset (font)
         layout.addWidget(self._divider())
@@ -218,15 +307,46 @@ class SideMenu(QWidget):
         tray_row.addStretch()
         layout.addLayout(tray_row)
 
+        # Advanced settings toggle (collapsible)
+        layout.addWidget(self._divider())
+        self._advanced_toggle_btn = QPushButton("Advanced Settings")
+        self._advanced_toggle_btn.setProperty("menuClass", "option-btn")
+        self._advanced_toggle_btn.setCheckable(True)
+        self._advanced_toggle_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._advanced_toggle_btn.setMinimumWidth(0)
+        self._advanced_toggle_btn.setMaximumWidth(16777215)
+        layout.addWidget(self._advanced_toggle_btn)
+
+        self._advanced_panel = QWidget()
+        adv_panel_layout = QVBoxLayout(self._advanced_panel)
+        adv_panel_layout.setContentsMargins(0, 4, 0, 0)
+        adv_panel_layout.setSpacing(6)
+        adv_panel_layout.addWidget(QLabel("Diff Threshold"))
+        self._threshold_label = QLabel("8")
+        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
+        self._threshold_slider.setMinimum(1)
+        self._threshold_slider.setMaximum(30)
+        self._threshold_slider.setValue(8)
+        self._threshold_slider.valueChanged.connect(
+            lambda v: (
+                self._threshold_label.setText(str(v)),
+                self.diff_threshold_changed.emit(float(v)),
+            )
+        )
+        threshold_row = QHBoxLayout()
+        threshold_row.addWidget(self._threshold_slider)
+        threshold_row.addWidget(self._threshold_label)
+        adv_panel_layout.addLayout(threshold_row)
+        layout.addWidget(self._advanced_panel)
+        self._advanced_panel.setVisible(False)
+
+        self._advanced_toggle_btn.clicked.connect(
+            lambda checked: self._set_advanced_visible(bool(checked))
+        )
+        self._set_advanced_visible(False)
+
         # Action buttons
         layout.addWidget(self._divider())
-        unload_btn = QPushButton("Unload Engines")
-        unload_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        unload_btn.setMinimumWidth(0)
-        unload_btn.setMaximumWidth(16777215)
-        unload_btn.clicked.connect(self.unload_engines_requested)
-        layout.addWidget(unload_btn)
-
         self._reset_btn = QPushButton("Reset to Defaults")
         self._reset_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._reset_btn.setMinimumWidth(0)
@@ -412,6 +532,9 @@ class SideMenu(QWidget):
             if tid != "auto":
                 btn.setChecked(False)
         self.theme_changed.emit("auto")
+        self.set_auto_read_selection(False)
+        self.set_auto_translate_selection(False)
+        self._set_advanced_visible(False)
         self.reset_requested.emit()
 
     def _add_toggle_section(self, layout, title: str,
@@ -449,6 +572,34 @@ class SideMenu(QWidget):
         row.addWidget(off_btn)
         row.addStretch()
         layout.addLayout(row)
+        return on_btn, off_btn
+
+    def _set_toggle_state(self, pair: tuple[QPushButton, QPushButton] | None, enabled: bool) -> None:
+        if not pair:
+            return
+        on_btn, off_btn = pair
+        for btn, should_check in ((on_btn, enabled), (off_btn, not enabled)):
+            if btn.isChecked() == should_check:
+                continue
+            block = btn.blockSignals(True)
+            btn.setChecked(should_check)
+            btn.blockSignals(block)
+
+    def set_auto_read_selection(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._auto_read_toggle, enabled)
+        if emit_signal:
+            self.auto_read_selection_changed.emit(enabled)
+
+    def set_auto_translate_selection(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._auto_translate_toggle, enabled)
+        if emit_signal:
+            self.auto_translate_selection_changed.emit(enabled)
+
+    def _set_advanced_visible(self, visible: bool) -> None:
+        if not hasattr(self, "_advanced_panel"):
+            return
+        self._advanced_toggle_btn.setChecked(visible)
+        self._advanced_panel.setVisible(visible)
 
     def _on_translation_backend_clicked(self, backend_id: str) -> None:
         """Update backend button selection and show/hide URL field."""

@@ -2,18 +2,44 @@ import asyncio
 import difflib
 import logging
 from collections import Counter
+from typing import Optional
+
+import cv2
 
 from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
-from logic.validator import score_japanese_density
+from logic.validator import (
+    clean_ocr_output_enhanced,
+    is_valid_japanese,
+    score_japanese_density,
+)
+
+try:
+    from logic.google_vision_ocr import GoogleVisionOCR
+except ImportError:  # pragma: no cover
+    GoogleVisionOCR = None  # type: ignore
+
+try:
+    from logic.deepseek_validator import DeepSeekValidator
+except ImportError:  # pragma: no cover
+    DeepSeekValidator = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 class CapturePipeline:
-    def __init__(self, engine_manager: EngineManager, capture: ScreenCapture, openai_validator=None):
+    def __init__(
+        self,
+        engine_manager: EngineManager,
+        capture: ScreenCapture,
+        openai_validator=None,
+        google_vision: Optional["GoogleVisionOCR"] = None,
+        deepseek_validator: Optional["DeepSeekValidator"] = None,
+    ):
         self.engine_manager = engine_manager
         self.capture = capture
         self._openai_validator = openai_validator
+        self._google_vision = google_vision
+        self._deepseek_validator = deepseek_validator
         
         self.capture_generation = 0
         self.is_processing = False
@@ -38,7 +64,7 @@ class CapturePipeline:
         """
         if self.is_processing:
             return None
-            
+
         self.is_processing = True
         self.capture_generation += 1
         my_gen = self.capture_generation
@@ -51,19 +77,25 @@ class CapturePipeline:
             if self.capture_generation != my_gen:
                 return None
                 
-            res = await self.engine_manager.run_ocr(frame)
+            res = None
+            if self._google_vision and self._google_vision.is_enabled():
+                res = await self._run_google_vision(frame)
+
+            if res is None:
+                res = await self.engine_manager.run_ocr(frame)
             
             if self.capture_generation != my_gen:
                 return None
                 
             text = (res.get("text", "") or "").strip()
-            
-            if text and self._openai_validator and await self._openai_validator.is_available():
-                text = await self._openai_validator.validate_and_fix(text)
-                res["text"] = text  # Update the result dict so meta is consistent
-                
-            conf = res.get("confidence")
+            text = clean_ocr_output_enhanced(text)
             meta = res.get("meta", {}) if isinstance(res, dict) else {}
+
+            text, meta = await self._apply_ai_validators(text, meta)
+            res["text"] = text
+            res["meta"] = meta
+            
+            conf = res.get("confidence")
             self._update_stats(meta)
 
             if not text:
@@ -84,6 +116,83 @@ class CapturePipeline:
             return None
         finally:
             self.is_processing = False
+
+    async def _apply_ai_validators(self, text: str, meta: dict | None) -> tuple[str, dict]:
+        if not text:
+            return text, meta or {}
+
+        meta = meta or {}
+        original_text = text
+
+        async def _run_validator(label: str, validator) -> dict | None:
+            if not validator:
+                return None
+            if not hasattr(validator, "is_available"):
+                return None
+            try:
+                available = await validator.is_available()  # type: ignore[func-returns-value]
+            except Exception:  # pragma: no cover
+                return None
+            if not available:
+                return None
+            try:
+                return await asyncio.wait_for(
+                    validator.validate_and_fix(text),
+                    timeout=5.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[Pipeline] %s validator timed out — using unvalidated text",
+                    label,
+                )
+                return None
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "[Pipeline] %s validator failed: %s", label, exc
+                )
+                return None
+
+        ai_validators = [
+            ("deepseek", self._deepseek_validator),
+            ("openai", self._openai_validator),
+        ]
+        for label, validator in ai_validators:
+            result = await _run_validator(label, validator)
+            if not result:
+                continue
+            new_text = (result.get("text", "") or "").strip()
+            if not new_text:
+                continue
+            meta["ai_validator"] = {
+                "engine": result.get("source", "unknown"),
+                "changed": new_text != original_text,
+            }
+            return clean_ocr_output_enhanced(new_text), meta
+
+        meta.setdefault("ai_validator", {"engine": "deterministic", "changed": False})
+        return text, meta
+
+    async def _run_google_vision(self, frame) -> dict | None:
+        try:
+            success, encoded = cv2.imencode(".png", frame)
+            if not success:
+                return None
+            text = await self._google_vision.ocr_image(encoded.tobytes())  # type: ignore[arg-type]
+            if not text:
+                return None
+            return {
+                "text": text,
+                "confidence": None,
+                "meta": {
+                    "engine": "google_vision",
+                    "cloud": True,
+                    "boxes_raw": 0,
+                    "boxes_merged": 0,
+                },
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Google Vision OCR processing failed: %s", exc)
+            return None
 
     async def run_auto(self, callback, interval_ms=500, stabilize_ms=800):
         """

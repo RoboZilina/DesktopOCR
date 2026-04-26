@@ -28,6 +28,7 @@ class TranscriptionTray(QWidget):
     recapture_requested = pyqtSignal()
     tts_requested       = pyqtSignal(str)   # text to speak
     translate_requested = pyqtSignal(str)   # text to translate (full)
+    selection_changed   = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -157,6 +158,9 @@ class TranscriptionTray(QWidget):
             # Actual translation fired externally via signal in Stage 6b/6c
             # For now just show what's selected
             self._sel_text.setPlainText(selected)
+            self.selection_changed.emit(selected)
+        else:
+            self.selection_changed.emit("")
 
     # --- Public API ---
 
@@ -246,3 +250,6 @@ class TranscriptionTray(QWidget):
 
     def get_ocr_text(self) -> str:
         return self._ocr_text.toPlainText()
+
+    def get_selection_text(self) -> str:
+        return self._sel_text.toPlainText()

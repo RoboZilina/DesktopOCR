@@ -163,3 +163,12 @@ class SelectionOverlay(QWidget):
         self._selection_norm = (nx, ny, nw, nh)
         self._last_valid_norm = (nx, ny, nw, nh)
         self.update()
+
+    def clear_selection(self):
+        """Clear the current selection and any in-progress drag state."""
+        self._selection_norm = None
+        self._last_valid_norm = None
+        self._start_overlay = None
+        self._current_overlay = None
+        self._dragging = False
+        self.update()

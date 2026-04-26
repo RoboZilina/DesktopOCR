@@ -18,6 +18,16 @@ from logic.validator import clean_ocr_output, clean_ocr_output_enhanced, is_vali
 
 logger = logging.getLogger(__name__)
 
+_DET_MIN_WIDTH_PCT = float(os.getenv("DESKTOCR_MIN_W_PCT", "0.015"))
+_DET_MIN_HEIGHT_PCT = float(os.getenv("DESKTOCR_MIN_H_PCT", "0.05"))
+_DET_MIN_AREA_PCT = float(os.getenv("DESKTOCR_MIN_AREA_PCT", "0.00015"))
+_DET_MIN_WIDTH_ABS = int(os.getenv("DESKTOCR_MIN_W_ABS", "8"))
+_DET_MIN_HEIGHT_ABS = int(os.getenv("DESKTOCR_MIN_H_ABS", "8"))
+_DET_MIN_AREA_ABS = int(os.getenv("DESKTOCR_MIN_AREA_ABS", "80"))
+_DET_MAX_ASPECT = float(os.getenv("DESKTOCR_MAX_ASPECT", "45"))
+_DET_MIN_ASPECT = float(os.getenv("DESKTOCR_MIN_ASPECT", "0.5"))
+_REC_PAD_PX = int(os.getenv("DESKTOCR_REC_PAD_PX", "2"))
+
 MIN_PRIMARY_JP_CHARS = 3
 MIN_CANDIDATE_JP_RATIO = 0.30
 MIN_CANDIDATE_JP_CHARS = 3
@@ -247,8 +257,10 @@ class EngineManager:
                 work_image = preprocess_paddle_slice(image)
                 detected_boxes = await self._current_instance.detect(work_image)
                 boxes_raw = len(detected_boxes)
+                h_img, w_img = work_image.shape[:2]
+                filtered_boxes = self._filter_boxes(detected_boxes, w_img, h_img)
 
-                primary = await self._recognize_box_groups(work_image, detected_boxes, expand_for_recognition=False)
+                primary = await self._recognize_box_groups(work_image, filtered_boxes, expand_for_recognition=False)
                 final_text = (primary.get("text", "") or "").strip()
                 final_conf = float(primary.get("confidence", 0.0) or 0.0)
                 base_meta = {
@@ -350,14 +362,16 @@ class EngineManager:
         return ex1, ey1, ex2, ey2
 
     def _filter_boxes(self, boxes: list, w: int, h: int) -> list[list[int]]:
+        total = len(boxes)
         if not boxes:
+            logger.info("[BoxFilter] 0/0 boxes kept after filtering (image %dx%d)", w, h)
             return []
 
-        min_w = max(8, int(w * 0.015))
-        min_h = max(8, int(h * 0.05))
-        min_area = max(80, int(w * h * 0.00015))
+        min_w = max(_DET_MIN_WIDTH_ABS, int(w * _DET_MIN_WIDTH_PCT))
+        min_h = max(_DET_MIN_HEIGHT_ABS, int(h * _DET_MIN_HEIGHT_PCT))
+        min_area = max(_DET_MIN_AREA_ABS, int(w * h * _DET_MIN_AREA_PCT))
 
-        out: list[list[int]] = []
+        kept: list[list[int]] = []
         for b in boxes:
             norm = self._normalize_box(b, w, h)
             if norm is None:
@@ -366,14 +380,40 @@ class EngineManager:
             bw = x2 - x1
             bh = y2 - y1
             area = bw * bh
-            if bw < min_w or bh < min_h or area < min_area:
-                continue
-            aspect = bw / bh if bh > 0 else 0.0
-            if aspect < 0.5 or aspect > 45.0:
-                continue
-            out.append([x1, y1, x2, y2])
+            aspect = (bw / bh) if bh > 0 else 0.0
 
-        return out
+            reject_reason = None
+            if bw < min_w:
+                reject_reason = "width_too_small"
+            elif bh < min_h:
+                reject_reason = "height_too_small"
+            elif area < min_area:
+                reject_reason = "area_too_small"
+            elif aspect < _DET_MIN_ASPECT or aspect > _DET_MAX_ASPECT:
+                reject_reason = "aspect_ratio"
+
+            if reject_reason:
+                logger.debug(
+                    "[BoxFilter] REJECTED box [%.0f,%.0f,%.0f,%.0f] w=%.0f h=%.0f area=%.0f aspect=%.2f | reason=%s",
+                    x1, y1, x2, y2, bw, bh, area, aspect, reject_reason,
+                )
+                continue
+
+            kept.append([x1, y1, x2, y2])
+            logger.debug(
+                "[BoxFilter] KEPT box [%.0f,%.0f,%.0f,%.0f] w=%.0f h=%.0f area=%.0f aspect=%.2f",
+                x1, y1, x2, y2, bw, bh, area, aspect,
+            )
+
+        logger.info(
+            "[BoxFilter] %d/%d boxes kept after filtering (image %dx%d)",
+            len(kept),
+            total,
+            w,
+            h,
+        )
+
+        return kept
 
     def _merge_horizontal_boxes(self, boxes: list, y_tol: int) -> list[list[int]]:
         if not boxes:
@@ -445,6 +485,14 @@ class EngineManager:
                 crop = cv2.getRectSubPix(image, (src_w, src_h), (cx, cy))
                 if crop is None or crop.size == 0:
                     continue
+                if _REC_PAD_PX > 0:
+                    pad = _REC_PAD_PX
+                    y_start = max(0, int(math.floor(y1)) - pad)
+                    y_end = min(h, int(math.ceil(y2)) + pad)
+                    x_start = max(0, int(math.floor(x1)) - pad)
+                    x_end = min(w, int(math.ceil(x2)) + pad)
+                    crop = image[y_start:y_end, x_start:x_end].copy()
+                logger.debug("[Rec] crop=%dx%d (expand=%s)", crop.shape[1] if crop is not None else 0, crop.shape[0] if crop is not None else 0, expand_for_recognition)
                 if dst_w != src_w or dst_h != src_h:
                     crop = cv2.resize(crop, (dst_w, dst_h), interpolation=cv2.INTER_LINEAR)
 

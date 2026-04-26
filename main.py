@@ -26,6 +26,8 @@ DEFAULT_SETTINGS = {
     "preprocessing_enabled": False,
     "auto_capture": True,
     "auto_copy": True,
+    "auto_read_selection": False,
+    "auto_translate_selection": False,
     "upscale_factor": 2.0,
     "history_visible": True,
     "text_size": "standard",
@@ -41,6 +43,13 @@ DEFAULT_SETTINGS = {
     "openai_validator_enabled": False,
     "openai_api_key": "",
     "openai_model": "gpt-4o-mini",
+    # DeepSeek settings
+    "deepseek_validator_enabled": False,
+    "deepseek_api_key": "",
+    "deepseek_model": "deepseek-chat",
+    # Google Vision settings
+    "google_vision_enabled": False,
+    "google_vision_api_key": "",
 }
 
 def _compute_diff(frame: np.ndarray, ref: np.ndarray | None) -> float:
@@ -67,6 +76,8 @@ from core.capture import ScreenCapture
 from core.capture_pipeline import CapturePipeline
 from core.tensor_utils import preprocess_paddle_slice
 from logic.openai_validator import OpenAIValidator
+from logic.deepseek_validator import DeepSeekValidator
+from logic.google_vision_ocr import GoogleVisionOCR
 
 
 
@@ -87,6 +98,7 @@ def parse_args():
     parser.add_argument("--det-model", type=str, default="PP-OCRv5_server_det_infer.onnx", help="Detection ONNX filename")
     parser.add_argument("--rec-model", type=str, default="PP-OCRv5_server_rec_infer.onnx", help="Recognition ONNX filename")
     parser.add_argument("--dict-file", type=str, default="japan_dict.txt", help="Dictionary filename")
+    parser.add_argument("--debug-ocr", action="store_true", help="Enable DEBUG logging for OCR engine and box filtering")
     return parser.parse_args()
 
 
@@ -169,6 +181,18 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
     logger = logging.getLogger(__name__)
 
+    if args.debug_ocr:
+        formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+        for name in ("core.ocr_engine", "core.engine_manager"):
+            dbg_logger = logging.getLogger(name)
+            dbg_logger.setLevel(logging.DEBUG)
+            dbg_logger.propagate = False
+            handler = logging.StreamHandler()
+            handler.setLevel(logging.DEBUG)
+            handler.setFormatter(formatter)
+            dbg_logger.handlers.clear()
+            dbg_logger.addHandler(handler)
+
     list_windows()
 
     MODEL_CONFIG = {
@@ -232,13 +256,35 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
     capture.set_region(*selected_region)
   
     
+    settings_state = DEFAULT_SETTINGS.copy()
+    google_vision: GoogleVisionOCR | None = None
+
     openai_validator = OpenAIValidator(
-        api_key=DEFAULT_SETTINGS.get("openai_api_key", ""),
-        model=DEFAULT_SETTINGS.get("openai_model", "gpt-4o-mini")
+        api_key=settings_state.get("openai_api_key", ""),
+        model=settings_state.get("openai_model", "gpt-4o-mini")
     )
-    openai_validator.set_enabled(DEFAULT_SETTINGS.get("openai_validator_enabled", False))
+    openai_validator.update_settings(
+        enabled=settings_state.get("openai_validator_enabled", False)
+    )
+
+    deepseek_validator = DeepSeekValidator(
+        api_key=settings_state.get("deepseek_api_key", ""),
+        model=settings_state.get("deepseek_model", "deepseek-chat"),
+        enabled=settings_state.get("deepseek_validator_enabled", False),
+    )
+
+    google_vision = GoogleVisionOCR(
+        api_key=settings_state.get("google_vision_api_key", ""),
+        enabled=settings_state.get("google_vision_enabled", False),
+    )
     
-    pipeline = CapturePipeline(engine_manager, capture, openai_validator)
+    pipeline = CapturePipeline(
+        engine_manager,
+        capture,
+        openai_validator,
+        google_vision,
+        deepseek_validator,
+    )
 
     try:
         logger.info("Loading engine: %s ...", args.engine)
@@ -341,6 +387,53 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 e.accept()
             window.closeEvent = _on_close
 
+            streaming_enabled = True
+
+            def _handle_stop_stream():
+                nonlocal streaming_enabled, capture, ref_frame
+                if not streaming_enabled:
+                    return
+                streaming_enabled = False
+                ref_frame = None
+                capture.stop()
+                window.clear_preview("Stream paused — select a source window to resume.")
+                window.controls_bar.set_streaming(False)
+                window.set_status("—", 0.0, 0.0, window_title or "—")
+
+            def _handle_select_window():
+                nonlocal streaming_enabled, capture, hwnd, window_title, ref_frame
+                from PyQt6.QtWidgets import QDialog
+                from ui.window_picker import WindowPickerDialog
+
+                window.controls_bar.set_streaming(False)
+                streaming_enabled = False
+                window.clear_preview("Select a source window to start streaming.", clear_selection=True)
+
+                dialog = WindowPickerDialog(window)
+                if dialog.exec() != QDialog.DialogCode.Accepted:
+                    window.controls_bar.set_streaming(False)
+                    return
+
+                new_hwnd = dialog.selected_hwnd
+                new_title = dialog.selected_title or hex(new_hwnd)
+                old_region = capture.region
+                capture.stop()
+                capture = ScreenCapture(new_hwnd)
+                if old_region:
+                    capture.set_region(*old_region)
+                pipeline.capture = capture
+                hwnd = new_hwnd
+                window_title = new_title
+                streaming_enabled = True
+                ref_frame = None
+                window.controls_bar.set_streaming(True)
+                window.request_preview_auto_fit()
+                window.set_status(engine_manager.current_id or "—", 0.0, 0.0, window_title)
+                ocr_trigger.set()
+
+            window.stop_stream_requested.connect(_handle_stop_stream)
+            window.select_window_requested.connect(_handle_select_window)
+
             # Connect overlay selection to capture region updates
             def _on_region_changed(nx, ny, nw, nh):
                 imgW, imgH = window.preview_widget.frame_size
@@ -355,7 +448,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             window.preview_widget.selection_overlay.region_changed.connect(_on_region_changed)
 
-            # Mutable settings container — accessible from lambda callbacks
             settings = {
                 "auto_capture": True,
                 "auto_copy": False,
@@ -370,10 +462,16 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.side_menu.auto_copy_changed.connect(
                 lambda v: settings.__setitem__("auto_copy", v)
             )
+            window.side_menu.auto_read_selection_changed.connect(
+                lambda v: settings_state.__setitem__("auto_read_selection", v)
+            )
             window.side_menu.history_visible_changed.connect(window.history_sidebar.setVisible)
             window.side_menu.preview_visible_changed.connect(window.preview_widget.setVisible)
             window.side_menu.text_size_changed.connect(window.transcription_tray.set_text_size)
             window.side_menu.tray_height_changed.connect(window.transcription_tray.set_tray_height)
+            window.side_menu.auto_translate_selection_changed.connect(
+                lambda v: settings_state.__setitem__("auto_translate_selection", v)
+            )
             window.side_menu.vn_cleaner_changed.connect(
                 lambda v: (
                     settings.__setitem__("vn_cleaner", v),
@@ -385,23 +483,67 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             )
             
             # OpenAI Validator Settings
+            def _on_openai_enabled_changed(enabled: bool):
+                settings_state["openai_validator_enabled"] = enabled
+                openai_validator.update_settings(enabled=enabled)
+
             window.side_menu.openai_validator_enabled_changed.connect(
-                openai_validator.set_enabled
+                _on_openai_enabled_changed
             )
             def _on_openai_api_key_changed(key: str):
-                openai_validator.api_key = key
+                settings_state["openai_api_key"] = key
+                openai_validator.update_settings(api_key=key)
             window.side_menu.openai_api_key_changed.connect(_on_openai_api_key_changed)
             def _on_openai_model_changed(model: str):
-                openai_validator._model = model
+                settings_state["openai_model"] = model
+                openai_validator.update_settings(model=model)
             window.side_menu.openai_model_changed.connect(_on_openai_model_changed)
-            
+
+            def _on_deepseek_enabled_changed(enabled: bool):
+                settings_state["deepseek_validator_enabled"] = enabled
+                deepseek_validator.update_settings(enabled=enabled)
+
+            def _on_deepseek_api_key_changed(key: str):
+                settings_state["deepseek_api_key"] = key
+                deepseek_validator.update_settings(api_key=key)
+
+            def _on_deepseek_model_changed(model: str):
+                settings_state["deepseek_model"] = model
+                deepseek_validator.update_settings(model=model)
+
+            window.side_menu.deepseek_validator_enabled_changed.connect(_on_deepseek_enabled_changed)
+            window.side_menu.deepseek_api_key_changed.connect(_on_deepseek_api_key_changed)
+            window.side_menu.deepseek_model_changed.connect(_on_deepseek_model_changed)
+
+            def _on_google_vision_enabled_changed(enabled: bool):
+                settings_state["google_vision_enabled"] = enabled
+                google_vision.update_settings(enabled=enabled)
+
+            def _on_google_vision_key_changed(key: str):
+                settings_state["google_vision_api_key"] = key
+                google_vision.update_settings(api_key=key)
+
+            window.side_menu.google_vision_enabled_changed.connect(_on_google_vision_enabled_changed)
+            window.side_menu.google_vision_api_key_changed.connect(_on_google_vision_key_changed)
+
+            window.side_menu.set_auto_read_selection(
+                settings_state.get("auto_read_selection", False),
+                emit_signal=True,
+            )
+            window.side_menu.set_auto_translate_selection(
+                settings_state.get("auto_translate_selection", False),
+                emit_signal=True,
+            )
+
             window.side_menu.reset_requested.connect(
                 lambda: [
                     settings.update({"auto_capture": True, "auto_copy": False, "vn_cleaner": True, "diff_threshold": 8.0}),
                     window.side_menu.auto_capture_changed.emit(True),
                     window.side_menu.auto_copy_changed.emit(False),
+                    window.side_menu.auto_read_selection_changed.emit(False),
                     window.side_menu.vn_cleaner_changed.emit(True),
                     window.side_menu.diff_threshold_changed.emit(8.0),
+                    window.side_menu.auto_translate_selection_changed.emit(False),
                 ]
             )
 
@@ -439,6 +581,9 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     ocr_trigger.set()
 
                 while not stop_event.is_set():
+                    if not streaming_enabled:
+                        await asyncio.sleep(PREVIEW_INTERVAL)
+                        continue
                     full_frame = await capture.get_frame(full=True)
                     if full_frame is not None:
                         window.set_preview_frame(full_frame)
@@ -456,6 +601,9 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             async def _ocr_task():
                 nonlocal _capture_gen
                 while not stop_event.is_set():
+                    if not streaming_enabled:
+                        await asyncio.sleep(0.5)
+                        continue
                     if settings["auto_capture"]:
                         try:
                             await asyncio.wait_for(ocr_trigger.wait(), timeout=0.5)
@@ -596,7 +744,14 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         print("\nCleaning up resources...")
         cv2.destroyAllWindows()
         capture.stop()
+        if google_vision is not None:
+            try:
+                await google_vision.close()
+            except Exception:  # noqa: BLE001
+                pass
         await engine_manager.dispose_all()
+        await openai_validator.dispose()
+        await deepseek_validator.dispose()
         print("Stopped.")
 
 def _resolve_hwnd_from_arg(value: str, logger: logging.Logger) -> int | None:
