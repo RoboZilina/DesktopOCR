@@ -99,7 +99,6 @@ def parse_args():
     parser.add_argument("--rec-model", type=str, default="rec.onnx", help="Recognition ONNX filename")
     parser.add_argument("--dict-file", type=str, default="japan_dict.txt", help="Dictionary filename")
     parser.add_argument("--debug-ocr", action="store_true", help="Enable DEBUG logging for OCR engine and box filtering")
-    parser.add_argument("--no-gui", action="store_true", help="Run in headless mode without the PyQt6 window")
     return parser.parse_args()
 
 
@@ -778,7 +777,7 @@ if __name__ == "__main__":
         sys.exit(0)
 
     # Determine mode: GUI mode when --hwnd is NOT provided
-    gui_mode = not args.no_gui
+    gui_mode = args.hwnd is None
 
     # QApplication is always needed for the picker dialog (and preview in GUI mode)
     try:

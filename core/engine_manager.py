@@ -26,7 +26,7 @@ _DET_MIN_HEIGHT_ABS = int(os.getenv("DESKTOCR_MIN_H_ABS", "8"))
 _DET_MIN_AREA_ABS = int(os.getenv("DESKTOCR_MIN_AREA_ABS", "80"))
 _DET_MAX_ASPECT = float(os.getenv("DESKTOCR_MAX_ASPECT", "45"))
 _DET_MIN_ASPECT = float(os.getenv("DESKTOCR_MIN_ASPECT", "0.5"))
-_REC_PAD_PX = int(os.getenv("DESKTOCR_REC_PAD_PX", "2"))
+_REC_PAD_PX = int(os.getenv("DESKTOCR_REC_PAD_PX", "4"))
 
 MIN_PRIMARY_JP_CHARS = 3
 MIN_CANDIDATE_JP_RATIO = 0.30
@@ -260,7 +260,11 @@ class EngineManager:
                 h_img, w_img = work_image.shape[:2]
                 filtered_boxes = self._filter_boxes(detected_boxes, w_img, h_img)
 
-                primary = await self._recognize_box_groups(work_image, filtered_boxes, expand_for_recognition=False)
+                primary = await self._recognize_box_groups(
+                    work_image,
+                    filtered_boxes,
+                    expand_for_recognition=(os.getenv("DESKTOCR_PADDLE_EXPAND", "1") == "1"),
+                )
                 final_text = (primary.get("text", "") or "").strip()
                 final_conf = float(primary.get("confidence", 0.0) or 0.0)
                 base_meta = {

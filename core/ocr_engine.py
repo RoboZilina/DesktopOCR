@@ -448,7 +448,21 @@ class PaddleOCR:
 
 
 
-                return self._ctc_greedy_decode(logits, [batch, time_steps, num_classes])
+                raw = self._ctc_greedy_decode(logits, [batch, time_steps, num_classes])
+                text = ""
+                score = 0.0
+                if isinstance(raw, list) and len(raw) > 0:
+                    item = raw[0]
+                    if isinstance(item, list) and len(item) >= 2:
+                        text = str(item[0]).strip()
+                        score = float(item[1]) if item[1] is not None else 0.0
+                    elif isinstance(item, dict):
+                        text = str(item.get("text", "")).strip()
+                        score = float(item.get("score", item.get("confidence", 0.0)))
+                elif isinstance(raw, dict):
+                    text = str(raw.get("text", "")).strip()
+                    score = float(raw.get("confidence", raw.get("score", 0.0)))
+                return {"text": text, "confidence": score}
 
             except Exception as e:
 
