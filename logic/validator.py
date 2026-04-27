@@ -142,9 +142,9 @@ def clean_ocr_output(text: str) -> str:
     text = text.replace("\u3000", " ")
     text = re.sub(r"\s+", " ", text)
 
-    # 2. Strip lone Latin letters (single letters not adjacent to other letters or numbers)
-    # Using negative lookbehind/lookahead to find letters not part of an alphanumeric word
-    text = re.sub(r'(?i)(?<![a-z0-9])[a-z](?![a-z0-9])', '', text)
+    # 2. Strip lone Latin letters (single letters not adjacent to other letters, numbers, or CJK)
+    # Using negative lookbehind/lookahead and ensuring we don't remove characters glued to JP text
+    text = re.sub(r'(?i)(?<![a-z0-9\u3040-\u9fff])[a-z](?![a-z0-9\u3040-\u9fff])', '', text)
     
     # 3. Strip repeated punctuation (3+ same punctuation chars in a row)
     # Target common OCR-noise candidates
@@ -212,6 +212,7 @@ _VN_PROTECTED = [
     ('……', '\uE000'),
     ('――', '\uE001'),
     ('〜〜', '\uE002'),
+    ('...', '\uE003'),
 ]
 
 def _protect_vn_sequences(text: str) -> str:

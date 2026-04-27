@@ -1,18 +1,13 @@
 import asyncio
 import difflib
 import logging
-from collections import Counter
 from typing import Optional
 
 import cv2
 
 from core.engine_manager import EngineManager
 from core.capture import ScreenCapture
-from logic.validator import (
-    clean_ocr_output_enhanced,
-    is_valid_japanese,
-    score_japanese_density,
-)
+from logic.validator import clean_ocr_output_enhanced
 
 try:
     from logic.google_vision_ocr import GoogleVisionOCR
@@ -47,7 +42,6 @@ class CapturePipeline:
         self._lock = asyncio.Lock()
         
         self._auto_task = None
-        self.multi_pass_enabled = False
         self._line_count: int = 1
         self._stats = {
             "frames": 0,
@@ -241,59 +235,6 @@ class CapturePipeline:
             self._auto_task = None
             
         self.is_processing = False
-
-    async def _multi_pass(self, frame, my_gen, line_count: int) -> dict | None:
-        """
-        Execute OCR pass 5 times and perform voting on the output.
-        """
-        # TODO: multi-pass requires different preprocessing per pass to be meaningful.
-        # Currently all 5 passes are identical (deterministic model).
-        # Wire up vision.py preprocessing variants here when implemented.
-        results = []
-        for _ in range(5):
-            res = await self.engine_manager.run_ocr(frame, line_count=line_count)
-            if self.capture_generation != my_gen:
-                return None
-                
-            results.append(res)
-            
-        return self._pick_best_result(results)
-
-    def _pick_best_result(self, results: list) -> dict:
-        """
-        Selects the best result from a multi-pass execution array.
-        """
-        if not results:
-            return {"text": "", "confidence": 0.0}
-
-        counts = Counter(r.get("text", "") for r in results)
-        
-        # 1. Majority vote
-        for text, count in counts.items():
-            if count >= 3:
-                # Return the first underlying result corresponding to the winning text
-                for r in results:
-                    if r.get("text", "") == text:
-                        return r
-                        
-        # 2 + 3. Highest confidence and Weighted score fallback
-        # Ported logic: evaluate weighted score directly returning the maximum
-        best_weighted = results[0]
-        best_score = -1.0
-        
-        for r in results:
-            conf = r.get("confidence")
-            if conf is None:
-                conf = 0.0
-                
-            density = score_japanese_density(r.get("text", ""))
-            
-            score = conf * 0.7 + density * 0.3
-            if score > best_score:
-                best_score = score
-                best_weighted = r
-                
-        return best_weighted
 
     def _is_near_duplicate(self, current: str, previous: str) -> bool:
         if not current or not previous:

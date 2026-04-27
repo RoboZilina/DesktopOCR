@@ -2,7 +2,10 @@ import cv2
 import numpy as np
 
 # Shared resources for zero-churn tensor conversion
-# Pre-allocate once, reuse every frame — never allocate inside the hot path
+# Pre-allocate once, reuse every frame — never allocate inside the hot path.
+# NOTE: These globals rely on PaddleOCR's `_busy_lock` to serialize recognition
+# calls. If we ever introduce true parallel Paddle passes, switch to per-call
+# allocations (or guard the buffers with explicit synchronization).
 DET_BUFFER = np.zeros((1, 3, 960, 960), dtype=np.float32)
 REC_BUFFER = np.zeros((1, 3, 48, 320), dtype=np.float32)
 

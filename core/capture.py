@@ -598,18 +598,11 @@ class ScreenCapture:
 
     def _apply_diff_and_crop(self, frame: np.ndarray, full: bool = False) -> Optional[np.ndarray]:
         """
-        1. MD5 frame diff check — return None if frame is unchanged.
-        2. Crop to self._region if set and full=False.
-        3. Update self.last_frame_hash with the new hash.
-
-        The hash is computed on the full (uncropped) frame to detect motion
-        anywhere in the window, not just the selected region.
+        1. Crop to self._region if set and full=False.
+        2. MD5 frame diff check on the cropped region — skip identical captures.
+        3. Update self.last_frame_hash with the new hash and return the cropped/full frame.
         """
-        # Frame diff — mirrors the pattern from instructions.md / capture_pipeline.js
-        new_hash = hashlib.md5(frame.tobytes()).hexdigest()
-        if new_hash == self.last_frame_hash:
-            return None   # identical frame — skip
-        self.last_frame_hash = new_hash
+        target = frame
 
         # Sub-region crop (skip when full=True for preview)
         if not full and self._region is not None:
@@ -620,9 +613,15 @@ class ScreenCapture:
             ry = max(0, ry)
             rw = max(1, min(rw, w - rx))
             rh = max(1, min(rh, h - ry))
-            frame = frame[ry:ry + rh, rx:rx + rw]
+            target = frame[ry:ry + rh, rx:rx + rw]
 
-        return frame
+        # Frame diff — mirrors the pattern from instructions.md / capture_pipeline.js
+        new_hash = hashlib.md5(target.tobytes()).hexdigest()
+        if new_hash == self.last_frame_hash:
+            return None   # identical region — skip
+        self.last_frame_hash = new_hash
+
+        return target
 
     # ------------------------------------------------------------------
     # Resource cleanup
