@@ -27,6 +27,7 @@ _DET_MIN_AREA_ABS = int(os.getenv("DESKTOCR_MIN_AREA_ABS", "80"))
 _DET_MAX_ASPECT = float(os.getenv("DESKTOCR_MAX_ASPECT", "45"))
 _DET_MIN_ASPECT = float(os.getenv("DESKTOCR_MIN_ASPECT", "0.5"))
 _REC_PAD_PX = int(os.getenv("DESKTOCR_REC_PAD_PX", "4"))
+_MERGE_Y_TOL_PCT = float(os.getenv("DESKTOCR_MERGE_Y_TOL_PCT", "0.08"))
 
 MIN_PRIMARY_JP_CHARS = 3
 MIN_CANDIDATE_JP_RATIO = 0.30
@@ -266,65 +267,58 @@ class EngineManager:
         try:
             if self._current_id == "paddle":
                 line_count = max(1, int(line_count or 1))
-                if line_count == 1:
-                    final_text, final_conf, base_meta, work_image = await self._run_paddle_pass(image, 0)
-                else:
-                    h_total = image.shape[0]
-                    if h_total <= 0:
-                        return self._normalize_result("", 0.0, {"warning": "empty_frame"})
+                bands = self._slice_into_bands(image, line_count)
+                if not bands:
+                    return self._normalize_result("", 0.0, {"warning": "empty_frame"})
+                logger.debug(
+                    "[Slice] line_count=%d bands=%d frame=%dx%d",
+                    line_count,
+                    len(bands),
+                    image.shape[1] if image is not None else -1,
+                    image.shape[0] if image is not None else -1,
+                )
 
-                    edges = [int(round(i * h_total / line_count)) for i in range(line_count + 1)]
-                    band_texts: list[str] = []
-                    band_confidences: list[float] = []
-                    aggregated_boxes: list[list[int]] = []
-                    boxes_raw_total = 0
-                    boxes_merged_total = 0
-                    fallback_used = False
-                    ocr_chars_total = 0
-                    processed_frames: list[np.ndarray] = []
+                band_texts: list[str] = []
+                band_confidences: list[float] = []
+                aggregated_boxes: list[list[int]] = []
+                boxes_raw_total = 0
+                boxes_merged_total = 0
+                fallback_used = False
+                ocr_chars_total = 0
+                processed_frames: list[np.ndarray] = []
 
-                    for idx in range(line_count):
-                        y1 = edges[idx]
-                        y2 = edges[idx + 1]
-                        if (y2 - y1) <= 0:
-                            band_texts.append("")
-                            band_confidences.append(0.0)
-                            continue
+                for band_image, y1, _y2 in bands:
+                    band_text, band_conf, band_meta, band_processed = await self._run_paddle_pass(band_image, y1)
+                    band_texts.append(band_text)
+                    band_confidences.append(band_conf)
+                    aggregated_boxes.extend(band_meta.get("boxes", []))
+                    boxes_raw_total += int(band_meta.get("boxes_raw", 0) or 0)
+                    boxes_merged_total += int(band_meta.get("boxes_merged", 0) or 0)
+                    fallback_used = fallback_used or bool(band_meta.get("fallback_used", False))
+                    ocr_chars_total += int(band_meta.get("ocr_chars", len(band_text)))
+                    if isinstance(band_processed, np.ndarray) and band_processed.size > 0:
+                        processed_frames.append(band_processed)
 
-                        band_image = image[y1:y2, :, :]
-                        if band_image.size == 0:
-                            band_texts.append("")
-                            band_confidences.append(0.0)
-                            continue
+                final_text = "\n".join(band_texts).strip()
+                final_conf = float(sum(band_confidences) / len(band_confidences)) if band_confidences else 0.0
+                base_meta = {
+                    "boxes_raw": boxes_raw_total,
+                    "boxes_merged": boxes_merged_total,
+                    "fallback_used": fallback_used,
+                    "ocr_chars": ocr_chars_total,
+                    "boxes": aggregated_boxes,
+                    "paddle_line_count": line_count,
+                }
 
-                        band_text, band_conf, band_meta, band_processed = await self._run_paddle_pass(band_image, y1)
-                        band_texts.append(band_text)
-                        band_confidences.append(band_conf)
-                        aggregated_boxes.extend(band_meta.get("boxes", []))
-                        boxes_raw_total += int(band_meta.get("boxes_raw", 0) or 0)
-                        boxes_merged_total += int(band_meta.get("boxes_merged", 0) or 0)
-                        fallback_used = fallback_used or bool(band_meta.get("fallback_used", False))
-                        ocr_chars_total += int(band_meta.get("ocr_chars", len(band_text)))
-                        if isinstance(band_processed, np.ndarray):
-                            processed_frames.append(band_processed)
-
-                    final_text = "\n".join(band_texts).strip()
-                    final_conf = float(sum(band_confidences) / len(band_confidences)) if band_confidences else 0.0
-                    base_meta = {
-                        "boxes_raw": boxes_raw_total,
-                        "boxes_merged": boxes_merged_total,
-                        "fallback_used": fallback_used,
-                        "ocr_chars": ocr_chars_total,
-                        "boxes": aggregated_boxes,
-                        "paddle_line_count": line_count,
-                    }
-                    if processed_frames:
-                        try:
-                            work_image = np.vstack(processed_frames)
-                        except ValueError:
-                            work_image = preprocess_paddle_slice(image)
-                    else:
+                if len(processed_frames) == 1:
+                    work_image = processed_frames[0]
+                elif len(processed_frames) == len(bands) and processed_frames:
+                    try:
+                        work_image = np.vstack(processed_frames)
+                    except ValueError:
                         work_image = preprocess_paddle_slice(image)
+                else:
+                    work_image = preprocess_paddle_slice(image)
             else:
                 work_image = preprocess_natural_slice(image)
                 rec = await self._current_instance.recognize(work_image)
@@ -418,6 +412,26 @@ class EngineManager:
             "confidence": float(confidence or 0.0),
             "meta": normalized_meta,
         }
+
+    def _slice_into_bands(self, image: np.ndarray, line_count: int) -> list[tuple[np.ndarray, int, int]]:
+        if image is None or image.size == 0:
+            return []
+        line_count = max(1, int(line_count or 1))
+        h_total = image.shape[0]
+        if h_total <= 0:
+            return []
+        edges = [int(round(i * h_total / line_count)) for i in range(line_count + 1)]
+        bands: list[tuple[np.ndarray, int, int]] = []
+        for idx in range(line_count):
+            y1 = edges[idx]
+            y2 = edges[idx + 1]
+            if (y2 - y1) <= 0:
+                continue
+            band = image[y1:y2, :, :]
+            if band.size == 0:
+                continue
+            bands.append((band, y1, y2))
+        return bands
 
     def _normalize_box(self, box: list, w: int, h: int) -> tuple[int, int, int, int] | None:
         x1 = int(math.floor(float(box[0])))

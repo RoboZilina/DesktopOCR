@@ -31,6 +31,7 @@ _logger = logging.getLogger(__name__)
 
 class MainWindow(QMainWindow):
     engine_changed = pyqtSignal(str)
+    paddle_line_count_changed = pyqtSignal(int)
     recapture_requested = pyqtSignal()
     tts_requested = pyqtSignal(str)
     translate_requested = pyqtSignal(str)
@@ -326,15 +327,21 @@ class MainWindow(QMainWindow):
     def _apply_engine_selection(self, selection: str, *, emit_signal: bool) -> None:
         base_engine, line_count = self._parse_engine_choice(selection)
         previous_engine = self._active_engine_id
+        prev_line_count = self._paddle_line_count
         self._active_engine_id = base_engine
 
         if base_engine == "paddle":
-            self._paddle_line_count = max(1, min(5, line_count))
+            new_line_count = max(1, min(5, line_count))
         else:
-            self._paddle_line_count = 1
+            new_line_count = 1
+        self._paddle_line_count = new_line_count
+        line_changed = new_line_count != prev_line_count
 
         if hasattr(self, "preview_widget"):
             self.preview_widget.set_line_guides(self.get_active_line_count())
+
+        if line_changed:
+            self.paddle_line_count_changed.emit(self._paddle_line_count)
 
         if emit_signal and previous_engine != base_engine:
             self.engine_changed.emit(base_engine)

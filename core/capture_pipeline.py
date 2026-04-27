@@ -59,6 +59,10 @@ class CapturePipeline:
             value = 1
         self._line_count = max(1, value)
 
+    def invalidate_generation(self) -> None:
+        """Bump generation counter so in-flight OCR results are discarded."""
+        self.capture_generation += 1
+
     async def capture_once(self, *, line_count: int = 1) -> dict | None:
         """
         Captures a frame and processes it via the OCR engine.

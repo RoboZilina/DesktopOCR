@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import numpy as np
 
@@ -6,7 +8,9 @@ import numpy as np
 # NOTE: These globals rely on PaddleOCR's `_busy_lock` to serialize recognition
 # calls. If we ever introduce true parallel Paddle passes, switch to per-call
 # allocations (or guard the buffers with explicit synchronization).
-DET_BUFFER = np.zeros((1, 3, 960, 960), dtype=np.float32)
+DET_LIMIT_SIDE_LEN = int(os.getenv("DESKTOCR_DET_LIMIT_SIDE_LEN", "1024"))
+DET_BUFFER = None
+DET_BUFFER_SHAPE: tuple[int, int, int, int] | None = None
 REC_BUFFER = np.zeros((1, 3, 48, 320), dtype=np.float32)
 
 # Detection box padding (applied in detection-space BEFORE scaling to original coords)
@@ -16,6 +20,10 @@ PAD_TOP = 12
 PAD_BOTTOM = 12
 
 MIN_BOX_AREA = 40 * 40
+
+CLAHE_CLIP_LIMIT = 2.0
+CLAHE_TILE_GRID_SIZE = (8, 8)
+SHARPEN_KERNEL = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
 
 
 def trim_empty_vertical(image: np.ndarray) -> np.ndarray:
@@ -38,11 +46,12 @@ def trim_empty_vertical(image: np.ndarray) -> np.ndarray:
     return image[top:bottom, :]
 
 
-def pad_left(image: np.ndarray, px: int = 4) -> np.ndarray:
+def pad_left(image: np.ndarray, px: int = 8) -> np.ndarray:
     if image is None or image.size == 0 or px <= 0:
         return image
     h, w = image.shape[:2]
-    out = np.zeros((h, w + px, 3), dtype=np.uint8)
+    channels = 1 if image.ndim == 2 else image.shape[2]
+    out = np.zeros((h, w + px, channels), dtype=image.dtype)
     out[:, px:] = image
     return out
 
@@ -53,12 +62,28 @@ def boost_contrast(image: np.ndarray, alpha: float = 1.08) -> np.ndarray:
     return cv2.convertScaleAbs(image, alpha=alpha, beta=0)
 
 
+def _ensure_bgr(image: np.ndarray) -> np.ndarray:
+    if image is None or image.size == 0:
+        return image
+    if image.ndim == 2:
+        return cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+    if image.shape[2] == 4:
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2BGR)
+    return image
+
+
 def preprocess_paddle_slice(image: np.ndarray) -> np.ndarray:
     if image is None or image.size == 0:
         return image
     trimmed = trim_empty_vertical(image)
-    padded = pad_left(trimmed, px=4)
-    return boost_contrast(padded, alpha=1.08)
+    work = _ensure_bgr(trimmed)
+    work = pad_left(work, px=8)
+    gray = cv2.cvtColor(work, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP_LIMIT, tileGridSize=CLAHE_TILE_GRID_SIZE)
+    enhanced = clahe.apply(gray)
+    restored = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
+    sharpened = cv2.filter2D(restored, -1, SHARPEN_KERNEL)
+    return sharpened
 
 
 def preprocess_natural_slice(image: np.ndarray) -> np.ndarray:
@@ -78,27 +103,65 @@ def preprocess_natural_slice(image: np.ndarray) -> np.ndarray:
 
     return cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-def image_to_det_tensor(image: np.ndarray) -> np.ndarray:
+def _ensure_det_buffer(height: int, width: int) -> np.ndarray:
+    global DET_BUFFER, DET_BUFFER_SHAPE
+    shape = (1, 3, height, width)
+    if DET_BUFFER is None or DET_BUFFER_SHAPE != shape:
+        DET_BUFFER = np.zeros(shape, dtype=np.float32)
+        DET_BUFFER_SHAPE = shape
+    return DET_BUFFER
+
+
+def _round_to_multiple(value: float, divisor: int = 32) -> int:
+    if divisor <= 0:
+        return int(round(value))
+    units = max(1, int(np.ceil(float(value) / float(divisor))))
+    return units * divisor
+
+
+def _resize_with_limit(image: np.ndarray, limit_side_len: int) -> tuple[np.ndarray, int, int]:
+    h, w = image.shape[:2]
+    if h <= 0 or w <= 0:
+        return image, h, w
+    scale = 1.0
+    max_side = max(h, w)
+    if limit_side_len > 0 and max_side > limit_side_len:
+        scale = limit_side_len / float(max_side)
+    target_h = _round_to_multiple(max(32.0, h * scale))
+    target_w = _round_to_multiple(max(32.0, w * scale))
+    if limit_side_len > 0:
+        target_h = min(limit_side_len, target_h)
+        target_w = min(limit_side_len, target_w)
+    if target_h == h and target_w == w:
+        return image, h, w
+    resized = cv2.resize(image, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
+    return resized, target_h, target_w
+
+
+def image_to_det_tensor(image: np.ndarray) -> tuple[np.ndarray, int, int]:
     """
-    canvasToFloat32Tensor equivalent for detection
-    Resize to 960x960 (direct stretch, matching web Paddle path)
+    canvasToFloat32Tensor equivalent for detection.
+    Resize while preserving aspect ratio, clamping the longest side to DET_LIMIT_SIDE_LEN.
+    Returns (tensor, height, width).
     """
-    source = image
-    target_h, target_w = 960, 960
-    canvas = cv2.resize(source, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-    
+    if image is None or image.size == 0:
+        return np.zeros((1, 3, 32, 32), dtype=np.float32), 32, 32
+    source = _ensure_bgr(image)
+    canvas, target_h, target_w = _resize_with_limit(source, DET_LIMIT_SIDE_LEN)
+
     # Normalize: (pixel/255 - 0.5) / 0.5
     img_float = canvas.astype(np.float32)
     img_float = (img_float / 255.0 - 0.5) / 0.5
-    
+
     # HWC to CHW
     img_chw = img_float.transpose(2, 0, 1)
-    
+
     # Write into DET_BUFFER in-place
-    DET_BUFFER[0] = img_chw
-    
+    buffer = _ensure_det_buffer(target_h, target_w)
+    buffer[0] = img_chw
+
     # Fallback for internal shared buffers (Legacy Copy logic)
-    return DET_BUFFER.copy()
+    return buffer.copy(), target_h, target_w
 
 def image_to_rec_tensor(image: np.ndarray) -> np.ndarray:
     """

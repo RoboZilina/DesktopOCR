@@ -38,8 +38,10 @@ logger = logging.getLogger(__name__)
 
 
 
-DET_THRESHOLD_BASE = float(os.getenv("DESKTOCR_DET_THRESHOLD", "0.60"))
-
+DET_THRESHOLD_BASE = max(0.10, float(os.getenv("DESKTOCR_DET_THRESHOLD", "0.15")))
+DET_BOX_THRESHOLD = max(0.25, float(os.getenv("DESKTOCR_DET_BOX_THRESHOLD", "0.30")))
+DET_UNCLIP_RATIO = min(3.0, max(1.0, float(os.getenv("DESKTOCR_DET_UNCLIP_RATIO", "2.5"))))
+DET_SCORE_MODE = os.getenv("DESKTOCR_DET_SCORE_MODE", "slow").strip().lower()
 DET_MIN_BOX_AREA = 40 * 40
 
 
@@ -242,7 +244,7 @@ class PaddleOCR:
 
 
 
-            tensor_data = image_to_det_tensor(image)
+            tensor_data, det_h, det_w = image_to_det_tensor(image)
 
             input_name = self.det_session.get_inputs()[0].name
 
@@ -280,7 +282,7 @@ class PaddleOCR:
 
             binary_map = (map_2d > threshold).astype(np.uint8)
 
-            num_labels, _labels, stats, _centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
+            num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
 
 
 
@@ -288,21 +290,13 @@ class PaddleOCR:
 
 
 
-            # image_to_det_tensor() stretches input directly to 960x960.
+            map_to_input_x = float(det_w) / float(map_w) if map_w > 0 else 1.0
 
-            # Map DB-map coordinates back to original image space using separate
+            map_to_input_y = float(det_h) / float(map_h) if map_h > 0 else 1.0
 
-            # x/y scales (matching web implementation behavior).
+            input_to_orig_x = float(w_orig) / float(det_w) if det_w > 0 else 1.0
 
-            det_input_size = 960.0
-
-            map_to_input_x = det_input_size / map_w
-
-            map_to_input_y = det_input_size / map_h
-
-            input_to_orig_x = float(w_orig) / det_input_size if det_input_size > 0 else 1.0
-
-            input_to_orig_y = float(h_orig) / det_input_size if det_input_size > 0 else 1.0
+            input_to_orig_y = float(h_orig) / float(det_h) if det_h > 0 else 1.0
 
 
 
@@ -352,13 +346,53 @@ class PaddleOCR:
 
 
 
-                p_min_x = max(0, min_x - pad_left)
+                p_min_x = max(0.0, float(min_x - pad_left))
 
-                p_min_y = max(0, min_y - pad_top)
+                p_min_y = max(0.0, float(min_y - pad_top))
 
-                p_max_x = min(map_w, max_x + pad_right + 1)
+                p_max_x = min(float(map_w), float(max_x + pad_right + 1))
 
-                p_max_y = min(map_h, max_y + pad_bottom + 1)
+                p_max_y = min(float(map_h), float(max_y + pad_bottom + 1))
+
+
+
+                # Component score (keep faint strokes when score_mode == "slow")
+
+                if DET_SCORE_MODE == "slow":
+
+                    component_mask = (labels == label)
+
+                    component_values = map_2d[component_mask]
+
+                else:
+
+                    component_values = map_2d[int(p_min_y):int(p_max_y), int(p_min_x):int(p_max_x)]
+
+                score = float(component_values.mean()) if component_values.size > 0 else 0.0
+
+                if score < DET_BOX_THRESHOLD:
+
+                    continue
+
+
+
+                box_w = p_max_x - p_min_x
+
+                box_h = p_max_y - p_min_y
+
+                if DET_UNCLIP_RATIO > 1.0 and box_w > 0 and box_h > 0:
+
+                    grow_x = 0.5 * (DET_UNCLIP_RATIO - 1.0) * box_w
+
+                    grow_y = 0.5 * (DET_UNCLIP_RATIO - 1.0) * box_h
+
+                    p_min_x = max(0.0, p_min_x - grow_x)
+
+                    p_max_x = min(float(map_w), p_max_x + grow_x)
+
+                    p_min_y = max(0.0, p_min_y - grow_y)
+
+                    p_max_y = min(float(map_h), p_max_y + grow_y)
 
 
 

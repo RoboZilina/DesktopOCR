@@ -21,9 +21,11 @@ from tts.edge_tts_backend import EdgeTTSBackend
 DIFF_THRESHOLD = 8.0
 PREVIEW_INTERVAL = 0.25
 STABILIZE_DELAY = 0.5
+DEFAULT_REGION = (0, 540, 1280, 180)
 
 DEFAULT_SETTINGS = {
     "ocr_engine": "server",
+    "paddle_line_count": 3,
     "preprocessing_enabled": False,
     "auto_capture": True,
     "auto_copy": True,
@@ -273,14 +275,18 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         selected_region = (int(x), int(y), int(w), int(h))
         logger.info("Selected region: %s", selected_region)
 
+    region_was_cli_defined = bool(args.region or args.select_region)
+    selection_ready = (not gui_mode) or region_was_cli_defined
+
     if selected_region is None:
-        selected_region = (0, 540, 1280, 180)
+        selected_region = DEFAULT_REGION
         logger.info("Using default region: %s", selected_region)
 
     capture.set_region(*selected_region)
   
     
     settings_state = load_settings()
+    saved_line_count = max(1, min(5, int(settings_state.get("paddle_line_count", 3) or 1)))
     google_vision: GoogleVisionOCR | None = None
 
     def _set_status_message(status_text: str, summary_text: str) -> None:
@@ -323,6 +329,21 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         google_vision,
         deepseek_validator,
     )
+    pipeline.set_line_count(saved_line_count)
+
+    def _persist_line_count(value: int) -> None:
+        nonlocal saved_line_count
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            normalized = 1
+        normalized = max(1, min(5, normalized))
+        pipeline.set_line_count(normalized)
+        if normalized == saved_line_count:
+            return
+        saved_line_count = normalized
+        settings_state["paddle_line_count"] = normalized
+        save_settings(settings_state)
 
     def _selected_line_count() -> int:
         if gui_mode and window is not None and hasattr(window, "get_active_line_count"):
@@ -330,7 +351,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 return int(window.get_active_line_count())
             except Exception:  # noqa: BLE001
                 return 1
-        return 1
+        return saved_line_count
 
     try:
         if gui_mode and window is not None:
@@ -357,7 +378,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             )
 
             if hasattr(window, "set_active_engine"):
-                window.set_active_engine(args.engine)
+                if args.engine.startswith("paddle"):
+                    window.set_active_engine("paddle", line_count=saved_line_count)
+                else:
+                    window.set_active_engine(args.engine)
+
+            if hasattr(window, "paddle_line_count_changed"):
+                window.paddle_line_count_changed.connect(_persist_line_count)
 
             # Translation is handled by MainWindow._on_translate_requested
             # (wired in MainWindow.__init__) — no stub needed here.
@@ -491,6 +518,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             # Connect overlay selection to capture region updates
             def _on_region_changed(nx, ny, nw, nh):
+                nonlocal ref_frame, _capture_gen, selection_ready
                 imgW, imgH = window.preview_widget.frame_size
                 if imgW == 0 or imgH == 0:
                     return
@@ -500,6 +528,12 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 h = int(nh * imgH)
                 capture.set_region(x, y, w, h)
                 logger.info("Region selected: x=%d y=%d w=%d h=%d", x, y, w, h)
+                ref_frame = None
+                pipeline.invalidate_generation()
+                _capture_gen += 1
+                selection_ready = True
+                window.clear_preview(clear_selection=False)
+                ocr_trigger.clear()
 
             window.preview_widget.selection_overlay.region_changed.connect(_on_region_changed)
 
@@ -697,7 +731,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     full_frame = await capture.get_frame(full=True)
                     if full_frame is not None:
                         window.set_preview_frame(full_frame)
-                        if settings["auto_capture"]:
+                        if settings["auto_capture"] and selection_ready:
                             region = capture.region or (0, 0, full_frame.shape[1], full_frame.shape[0])
                             crop_frame = _manual_crop(full_frame, region)
                             diff = _compute_diff(crop_frame, ref_frame)
@@ -713,6 +747,9 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 while not stop_event.is_set():
                     if not streaming_enabled:
                         await asyncio.sleep(0.5)
+                        continue
+                    if not selection_ready:
+                        await asyncio.sleep(0.2)
                         continue
                     if settings["auto_capture"]:
                         try:
