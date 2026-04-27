@@ -453,6 +453,8 @@ class EngineManager:
         if not boxes:
             return {"text": "", "confidence": 0.0}
 
+        logger.debug("OCR: starting recognition for %d boxes", len(boxes))
+
         h, w = image.shape[:2]
         texts: list[str] = []
         confidences: list[float] = []
@@ -460,6 +462,8 @@ class EngineManager:
         import os
         _REC_MIN_CONF = float(os.getenv("DESKTOCR_REC_MIN_CONF", "0.50"))
 
+        boxes = sorted(boxes, key=lambda b: b[0])
+        logger.debug("OCR: sorted boxes = %s", boxes)
         for box in boxes:
             if expand_for_recognition:
                 norm = self._normalize_box(box, w, h)
@@ -469,6 +473,9 @@ class EngineManager:
                 if expanded is None:
                     continue
                 x1, y1, x2, y2 = expanded
+                logger.debug("OCR: processing box %s", (x1, y1, x2, y2))
+                bw = x2 - x1
+                bh = y2 - y1
                 crop = image[y1:y2, x1:x2].copy()
             else:
                 # Web parity crop semantics (Canvas drawImage-style):
@@ -477,6 +484,7 @@ class EngineManager:
                 y1 = max(0.0, min(float(h), float(box[1])))
                 x2 = max(0.0, min(float(w), float(box[2])))
                 y2 = max(0.0, min(float(h), float(box[3])))
+                logger.debug("OCR: processing box %s", (x1, y1, x2, y2))
                 bw = x2 - x1
                 bh = y2 - y1
                 if bw <= 0.0 or bh <= 0.0:
@@ -503,15 +511,16 @@ class EngineManager:
                 if dst_w != src_w or dst_h != src_h:
                     crop = cv2.resize(crop, (dst_w, dst_h), interpolation=cv2.INTER_LINEAR)
 
+            logger.debug("OCR: crop size = %dx%d", bw, bh)
             res = await self._current_instance.recognize(crop)
             text = res.get("text", "").strip()
             conf = float(res.get("confidence", 0.0) or 0.0)
             logger.debug("[RecResult] text='%s' conf=%.2f", text, conf)
+            logger.debug("OCR: recognized text = '%s' (confidence=%s)", text, conf)
             if text:
                 texts.append(text)
                 confidences.append(conf)
 
-        final_text = "\n".join(texts)
         avg_conf = float(sum(confidences) / len(confidences)) if confidences else 0.0
         return {"text": final_text, "confidence": avg_conf}
 

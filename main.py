@@ -287,18 +287,24 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
     )
 
     try:
+        if gui_mode and window is not None:
+            window.set_status("Loading engine…", "")
         logger.info("Loading engine: %s ...", args.engine)
         success = await engine_manager.switch_engine(args.engine)
         if not success:
             logger.error("Failed to load engine: %s", args.engine)
             return
+        if gui_mode and window is not None:
+            window.set_status("Ready", "")
 
         # ---- GUI controls setup -----------------------------------
         if gui_mode:
             async def _on_engine_changed(engine_id: str):
+                if window is not None:
+                    window.set_status("Loading engine…", "")
                 ok = await engine_manager.switch_engine(engine_id)
-                if ok:
-                    window.set_status(engine_id, 0.0, 0.0, window_title or hex(hwnd))
+                if ok and window is not None:
+                    window.set_status("Ready", "")
 
             window.engine_changed.connect(
                 lambda eid: asyncio.ensure_future(_on_engine_changed(eid))
@@ -398,7 +404,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 capture.stop()
                 window.clear_preview("Stream paused — select a source window to resume.")
                 window.controls_bar.set_streaming(False)
-                window.set_status("—", 0.0, 0.0, window_title or "—")
+                window.set_status("Ready", "")
 
             def _handle_select_window():
                 nonlocal streaming_enabled, capture, hwnd, window_title, ref_frame
@@ -428,7 +434,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 ref_frame = None
                 window.controls_bar.set_streaming(True)
                 window.request_preview_auto_fit()
-                window.set_status(engine_manager.current_id or "—", 0.0, 0.0, window_title)
+                window.set_status("Ready", "")
                 ocr_trigger.set()
 
             window.stop_stream_requested.connect(_handle_stop_stream)
@@ -561,6 +567,38 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             ocr_trigger = asyncio.Event()
 
+            def _build_status_summary(meta: dict | None = None, *, conf: float = 0.0, elapsed_ms: float = 0.0) -> str:
+                meta = meta or {}
+                active_window = window_title or "—"
+                engine_label = meta.get("engine", engine_manager.current_id)
+                translator_label = window.get_translator_summary()
+                validator_meta = meta.get("ai_validator") or meta.get("validator") or {}
+                validator_name = validator_meta.get("engine")
+                if not validator_name:
+                    enabled_flag = validator_meta.get("enabled")
+                    if enabled_flag is None:
+                        validator_name = "deterministic"
+                    else:
+                        validator_name = "On" if enabled_flag else "Off"
+                tts_name = getattr(getattr(tts, "active", None), "name", "default")
+                summary = (
+                    f"Window: {active_window} | "
+                    f"Engine: {engine_label} | "
+                    f"Translator: {translator_label} | "
+                    f"Validator: {validator_name} | "
+                    f"TTS: {tts_name}"
+                )
+                if os.getenv("DESKTOCR_DEBUG_UI") == "1":
+                    boxes = int(meta.get("boxes_raw", 0) or 0)
+                    expanded_flag = os.getenv("DESKTOCR_PADDLE_EXPAND", "1") == "1"
+                    summary += (
+                        f" | Boxes: {boxes}"
+                        f" | Confidence: {conf:.2f}"
+                        f" | Expanded: {'yes' if expanded_flag else 'no'}"
+                        f" | Time: {elapsed_ms:.1f} ms"
+                    )
+                return summary
+
             # Wire re-capture button in tray to force immediate OCR
             def _on_recapture():
                 if hwnd is None:
@@ -621,7 +659,11 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     if stop_event.is_set():
                         break
 
+                    if window is not None:
+                        window.set_status("Processing…", "")
+                    ocr_started = time.perf_counter()
                     res = await pipeline.capture_once()
+                    elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
 
                     # Discard stale result if a newer trigger fired during OCR
                     if this_gen is not None and this_gen != _capture_gen:
@@ -630,7 +672,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     if res is not None:
                         text = res.get("text", "")
                         conf = res.get("confidence", 0.0)
-                        engine_id = engine_manager.current_id
+                        meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                        engine_id = meta.get("engine", engine_manager.current_id)
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
                         if text:
@@ -640,6 +683,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                             QApplication.clipboard().setText(text)
                             
                         window.side_menu.update_openai_usage(openai_validator.cost_estimate_chars)
+
+                        if window is not None:
+                            summary_text = _build_status_summary(meta=meta, conf=float(conf or 0.0), elapsed_ms=elapsed_ms)
+                            window.set_status("Done", summary_text)
+                    else:
+                        if window is not None:
+                            window.set_status("Ready", "")
 
                     await asyncio.sleep(1.5)
 
@@ -810,7 +860,7 @@ if __name__ == "__main__":
         from ui.main_window import MainWindow
 
         window = MainWindow()
-        window.set_status("—", 0.0, 0.0, window_title or hex(hwnd))
+        window.set_status("Ready", window_title or hex(hwnd))
         window.show()
         if hwnd is not None:
             window.controls_bar.set_streaming(True)

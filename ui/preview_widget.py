@@ -162,6 +162,9 @@ class PreviewWidget(QWidget):
         )
 
     def _on_selection_changed(self, nx: float, ny: float, nw: float, nh: float) -> None:
+        if nw < 20 or nh < 20:
+            self._hint_label.setText("Selected area is too small (min 20×20).")
+            return
         if nw > 0 and nh > 0:
             self._dismiss_hint()
 

@@ -73,6 +73,7 @@ class MainWindow(QMainWindow):
         # Status bar (native)
         self.status_bar = StatusBar()
         self.setStatusBar(self.status_bar)
+        self.status_bar.set_status("Ready", "")
 
         # Side menu overlay (hidden by default)
         self.side_menu = SideMenu(self)
@@ -213,11 +214,18 @@ class MainWindow(QMainWindow):
         self._frame_queue.clear()
         self.preview_widget.clear_frame(placeholder, clear_selection=clear_selection)
 
-    def set_status(self, engine: str, fps: float, conf: float, window_title: str):
-        self.status_bar.set_engine(engine)
-        self.status_bar.set_fps(fps)
-        self.status_bar.set_confidence(conf)
-        self.status_bar.set_window_title(window_title)
+    def set_status(self, status_text: str, summary_text: str):
+        self.status_bar.set_status(status_text, summary_text)
+
+    def get_translator_summary(self) -> str:
+        backend = getattr(self, "_translation_backend", "auto") or "auto"
+        label_map = {
+            "auto": "Auto",
+            "deepl": "DeepL",
+            "google": "Google",
+        }
+        label = label_map.get(backend, backend.title())
+        return label if self._translation_enabled else f"{label} (off)"
 
     def request_preview_auto_fit(self) -> None:
         """Allow the next incoming frame to resize the window to match its width."""
