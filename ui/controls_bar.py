@@ -1,7 +1,7 @@
 """Header controls bar — mirrors web app's top nav bar."""
 
-from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton, QSizePolicy
+from PyQt6.QtCore import pyqtSignal, Qt, QSize
 from ui.theme import ThemePalette, DARK
 
 
@@ -39,30 +39,32 @@ class ControlsBar(QWidget):
             "background: transparent; border-bottom: 1px solid transparent;"
         )
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 4, 12, 4)
-        layout.setSpacing(8)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(6)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # Brand / Menu
         self._menu_btn = QPushButton("☰")
-        self._menu_btn.setFixedSize(32, 32)
-        self._menu_btn.setStyleSheet(
-            "background: none; border: none; color: #a1a1aa; font-size: 14px;"
-        )
+        self._menu_btn.setObjectName("hamburger_button")
+        self._style_button(self._menu_btn)
         self._menu_btn.clicked.connect(self.menu_requested)
         layout.addWidget(self._menu_btn)
 
         brand = QLabel("Personal OCR")
         brand.setObjectName("PersonalOCR")
+        brand.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         brand.setStyleSheet(
-            "color: #ffffff; font-size: 14px; font-weight: 800; letter-spacing: 0.5px;"
+            "color: #ffffff; font-size: 14px; font-weight: 800; letter-spacing: 0.5px; background: transparent; border: none;"
         )
         layout.addWidget(brand)
 
-        layout.addSpacing(24)
+        layout.addSpacing(6)
 
         # Engine selector
         self._engine_lbl = QLabel("Engine")
-        self._engine_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold;")
+        self._engine_lbl.setObjectName("section_header")
+        self._engine_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._engine_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold; background: transparent; border: none;")
         layout.addWidget(self._engine_lbl)
         self._engine_combo = QComboBox()
         self._engine_combo.addItems(engines)
@@ -70,11 +72,13 @@ class ControlsBar(QWidget):
         self._engine_combo.currentTextChanged.connect(self.engine_changed.emit)
         layout.addWidget(self._engine_combo)
 
-        layout.addSpacing(12)
+        layout.addSpacing(6)
 
         # Voice selector
         self._voice_lbl = QLabel("Voice")
-        self._voice_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold;")
+        self._voice_lbl.setObjectName("section_header")
+        self._voice_lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._voice_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold; background: transparent; border: none;")
         layout.addWidget(self._voice_lbl)
         self.voice_selector = QComboBox()
         self.voice_selector.setObjectName("VoiceSelector")
@@ -84,16 +88,15 @@ class ControlsBar(QWidget):
         self.voice_selector.currentTextChanged.connect(self._emit_voice_change)
         layout.addWidget(self.voice_selector)
 
-        layout.addSpacing(12)
+        layout.addSpacing(6)
 
         layout.addStretch()
 
         # Stream toggle button (green = select window, red = stop stream)
         self._stream_btn = QPushButton("Select Source Window")
         self._stream_btn.setObjectName("StreamButton")
-        self._stream_btn.setFixedHeight(40)
+        self._style_button(self._stream_btn)
         self._stream_btn.setMinimumWidth(210)
-        self._stream_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._stream_btn.clicked.connect(self._on_stream_btn_clicked)
         self._streaming = False
         self._update_stream_btn_style()
@@ -157,15 +160,45 @@ class ControlsBar(QWidget):
         brand = self.findChild(QLabel, "PersonalOCR")
         if brand:
             brand.setStyleSheet(
-                f"color: {pal.text}; font-size: 14px; font-weight: 800; letter-spacing: 0.5px;"
+                f"color: {pal.text}; font-size: 14px; font-weight: 800; letter-spacing: 0.5px; background: transparent; border: none;"
             )
+        hover_bg = "rgba(255, 255, 255, 0.12)" if pal.is_dark else "rgba(0, 0, 0, 0.08)"
+        pressed_bg = "rgba(255, 255, 255, 0.2)" if pal.is_dark else "rgba(0, 0, 0, 0.14)"
         self._menu_btn.setStyleSheet(
-            f"background: none; border: none; color: {pal.text}; font-size: 14px;"
+            (
+                f"QPushButton#hamburger_button {{"
+                f" background: transparent;"
+                f" border: none;"
+                f" color: {pal.text};"
+                f" font-size: 14px;"
+                f" border-radius: 6px;"
+                f" padding: 4px;"
+                f" text-align: center;"
+                f"}}"
+                f"QPushButton#hamburger_button:hover {{"
+                f" background-color: {hover_bg};"
+                f"}}"
+                f"QPushButton#hamburger_button:pressed {{"
+                f" background-color: {pressed_bg};"
+                f"}}"
+            )
         )
         self._engine_lbl.setStyleSheet(
-            f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold;"
+            f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold; background: transparent; border: none;"
         )
         self._voice_lbl.setStyleSheet(
-            f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold;"
+            f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold; background: transparent; border: none;"
         )
         self.voice_selector.setStyleSheet(_combo_style(pal))
+
+    def set_menu_icon(self, opened: bool):
+        self._menu_btn.setText("✕" if opened else "☰")
+
+    def _style_button(self, btn: QPushButton):
+        btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        btn.setMinimumHeight(28)
+        btn.setMinimumWidth(32)
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setProperty("role", "button")
+        btn.setIconSize(QSize(16, 16))
+        btn.setStyleSheet("text-align: center; padding: 4px 8px;")

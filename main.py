@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import ctypes
 import ctypes.wintypes
+import json
 import logging
 import math
 import os
@@ -51,6 +52,29 @@ DEFAULT_SETTINGS = {
     "google_vision_enabled": False,
     "google_vision_api_key": "",
 }
+
+SETTINGS_PATH = pathlib.Path("settings.json")
+
+
+def load_settings() -> dict:
+    settings = DEFAULT_SETTINGS.copy()
+    if SETTINGS_PATH.exists():
+        try:
+            raw = json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                for key in settings:
+                    if key in raw:
+                        settings[key] = raw[key]
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).warning("Failed to load settings: %s", exc)
+    return settings
+
+
+def save_settings(settings: dict) -> None:
+    try:
+        SETTINGS_PATH.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).warning("Failed to save settings: %s", exc)
 
 def _compute_diff(frame: np.ndarray, ref: np.ndarray | None) -> float:
     """Return mean absolute pixel difference between two BGR frames."""
@@ -256,14 +280,19 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
     capture.set_region(*selected_region)
   
     
-    settings_state = DEFAULT_SETTINGS.copy()
+    settings_state = load_settings()
     google_vision: GoogleVisionOCR | None = None
+
+    def _set_status_message(status_text: str, summary_text: str) -> None:
+        if gui_mode and window is not None:
+            window.set_status(status_text, summary_text)
 
     openai_validator = OpenAIValidator(
         api_key=settings_state.get("openai_api_key", ""),
         model=settings_state.get("openai_model", "gpt-4o-mini")
     )
     openai_validator.update_settings(
+        api_key=settings_state.get("openai_api_key", ""),
         enabled=settings_state.get("openai_validator_enabled", False)
     )
 
@@ -272,11 +301,20 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         model=settings_state.get("deepseek_model", "deepseek-chat"),
         enabled=settings_state.get("deepseek_validator_enabled", False),
     )
+    deepseek_validator.update_settings(
+        api_key=settings_state.get("deepseek_api_key", ""),
+        enabled=settings_state.get("deepseek_validator_enabled", False),
+    )
 
     google_vision = GoogleVisionOCR(
         api_key=settings_state.get("google_vision_api_key", ""),
         enabled=settings_state.get("google_vision_enabled", False),
     )
+    google_vision.update_settings(
+        api_key=settings_state.get("google_vision_api_key", ""),
+        enabled=settings_state.get("google_vision_enabled", False),
+    )
+    google_vision.set_status_callback(_set_status_message)
     
     pipeline = CapturePipeline(
         engine_manager,
@@ -285,6 +323,14 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         google_vision,
         deepseek_validator,
     )
+
+    def _selected_line_count() -> int:
+        if gui_mode and window is not None and hasattr(window, "get_active_line_count"):
+            try:
+                return int(window.get_active_line_count())
+            except Exception:  # noqa: BLE001
+                return 1
+        return 1
 
     try:
         if gui_mode and window is not None:
@@ -309,6 +355,9 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.engine_changed.connect(
                 lambda eid: asyncio.ensure_future(_on_engine_changed(eid))
             )
+
+            if hasattr(window, "set_active_engine"):
+                window.set_active_engine(args.engine)
 
             # Translation is handled by MainWindow._on_translate_requested
             # (wired in MainWindow.__init__) — no stub needed here.
@@ -499,6 +548,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_openai_api_key_changed(key: str):
                 settings_state["openai_api_key"] = key
                 openai_validator.update_settings(api_key=key)
+                save_settings(settings_state)
+                _set_status_message("Ready", "OpenAI key updated")
             window.side_menu.openai_api_key_changed.connect(_on_openai_api_key_changed)
             def _on_openai_model_changed(model: str):
                 settings_state["openai_model"] = model
@@ -512,6 +563,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_deepseek_api_key_changed(key: str):
                 settings_state["deepseek_api_key"] = key
                 deepseek_validator.update_settings(api_key=key)
+                save_settings(settings_state)
+                _set_status_message("Ready", "DeepSeek key updated")
 
             def _on_deepseek_model_changed(model: str):
                 settings_state["deepseek_model"] = model
@@ -528,6 +581,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_google_vision_key_changed(key: str):
                 settings_state["google_vision_api_key"] = key
                 google_vision.update_settings(api_key=key)
+                save_settings(settings_state)
+                _set_status_message("Ready", "Google Vision key updated")
 
             window.side_menu.google_vision_enabled_changed.connect(_on_google_vision_enabled_changed)
             window.side_menu.google_vision_api_key_changed.connect(_on_google_vision_key_changed)
@@ -540,6 +595,23 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state.get("auto_translate_selection", False),
                 emit_signal=True,
             )
+            window.side_menu.set_openai_validator_enabled(
+                settings_state.get("openai_validator_enabled", False),
+                emit_signal=True,
+            )
+            window.side_menu.set_openai_api_key(settings_state.get("openai_api_key", ""))
+            window.side_menu.set_openai_model(settings_state.get("openai_model", "gpt-4o-mini"))
+            window.side_menu.set_deepseek_validator_enabled(
+                settings_state.get("deepseek_validator_enabled", False),
+                emit_signal=True,
+            )
+            window.side_menu.set_deepseek_api_key(settings_state.get("deepseek_api_key", ""))
+            window.side_menu.set_deepseek_model(settings_state.get("deepseek_model", "deepseek-chat"))
+            window.side_menu.set_google_vision_enabled(
+                settings_state.get("google_vision_enabled", False),
+                emit_signal=True,
+            )
+            window.side_menu.set_google_vision_api_key(settings_state.get("google_vision_api_key", ""))
 
             window.side_menu.reset_requested.connect(
                 lambda: [
@@ -662,7 +734,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     if window is not None:
                         window.set_status("Processing…", "")
                     ocr_started = time.perf_counter()
-                    res = await pipeline.capture_once()
+                    res = await pipeline.capture_once(line_count=_selected_line_count())
                     elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
 
                     # Discard stale result if a newer trigger fired during OCR
@@ -673,7 +745,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         text = res.get("text", "")
                         conf = res.get("confidence", 0.0)
                         meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                        preprocessed_frame = res.get("preprocessed_frame") if isinstance(res, dict) else None
+                        raw_frame = res.get("frame") if isinstance(res, dict) else None
+                        boxes = meta.get("boxes") if isinstance(meta, dict) else None
                         engine_id = meta.get("engine", engine_manager.current_id)
+                        if window is not None:
+                            window.set_ocr_boxes(boxes)
+                            window.set_ocr_canvas_frames(raw_frame, preprocessed_frame, boxes)
                         timestamp = datetime.now().strftime("%H:%M:%S")
                         print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
                         if text:
@@ -742,7 +820,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 cv2.imshow("OCR Canvas", vis)
                 cv2.waitKey(1)
 
-                res = await engine_manager.run_ocr(frame)
+                res = await engine_manager.run_ocr(frame, line_count=_selected_line_count())
                 text = (res.get("text", "") or "").strip()
                 conf = float(res.get("confidence", 0.0) or 0.0)
                 meta = res.get("meta", {}) if isinstance(res, dict) else {}
@@ -764,7 +842,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 await asyncio.sleep(1.5)
                 continue
 
-            res = await pipeline.capture_once()
+            res = await pipeline.capture_once(line_count=_selected_line_count())
             
             if res is not None:
                 text = res.get("text", "")

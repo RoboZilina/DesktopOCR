@@ -28,26 +28,45 @@ QLabel[secondary="true"] {
     color: {TEXT_SECONDARY};
 }
 
-/* ===== Universal Buttons ===== */
-QPushButton, QToolButton, QWidget[role="button"] {
+/* UNIVERSAL BUTTON STYLE */
+QPushButton,
+QToolButton,
+QWidget[role="button"] {
     background-color: {PANEL};
     border: 1px solid {BORDER};
     border-radius: 6px;
-    padding: 6px 10px;
+    padding: 4px 8px;
+    min-height: 28px;
 }
 
-QPushButton:hover, QToolButton:hover, QWidget[role="button"]:hover {
+QPushButton:hover,
+QToolButton:hover,
+QWidget[role="button"]:hover {
+    background-color: {HOVER};
     border-color: {ACCENT};
 }
 
-QPushButton:pressed, QToolButton:pressed, QWidget[role="button"]:pressed {
-    background-color: {ACCENT_GLOW};
+QPushButton:pressed,
+QToolButton:pressed,
+QWidget[role="button"]:pressed {
+    background-color: {PRESSED};
+    border-color: {ACCENT_DARK};
 }
 
-QPushButton[selected="true"], QToolButton[selected="true"], QWidget[role="button"][selected="true"] {
+QPushButton:checked,
+QToolButton:checked,
+QWidget[role="button"][checked="true"] {
     background-color: {ACCENT};
     color: white;
     border-color: {ACCENT};
+}
+
+QPushButton:disabled,
+QToolButton:disabled,
+QWidget[role="button"]:disabled {
+    background-color: {DISABLED_BG};
+    color: {DISABLED_FG};
+    border-color: {DISABLED_BORDER};
 }
 
 /* ===== Checkboxes ===== */
@@ -93,4 +112,44 @@ QScrollBar::handle:vertical {
 QScrollBar::add-line,
 QScrollBar::sub-line {
     height: 0;
+}
+
+/* Prevent labels from drawing background rectangles */
+QLabel {
+    background: transparent;
+}
+
+/* 
+   Remove background from ALL header-like widgets.
+   This covers QLabel, QFrame, QWidget, and any auto-created container.
+   It also removes borders that might create a "box" effect.
+*/
+
+QWidget[role="header"],
+QFrame[role="header"],
+QWidget[role="section-header"],
+QFrame[role="section-header"],
+QWidget[role="title"],
+QFrame[role="title"],
+QWidget[role="panel-header"],
+QFrame[role="panel-header"],
+QWidget#section_header,
+QFrame#section_header,
+QWidget#header,
+QFrame#header,
+QWidget#title,
+QFrame#title {
+    background: transparent;
+    border: none;
+}
+
+/* 
+   Also remove background from ANY widget that contains only a label 
+   and is used as a header, even if it has no objectName.
+   This is the universal fallback.
+*/
+
+QWidget:has(> QLabel) {
+    background: transparent;
+    border: none;
 }

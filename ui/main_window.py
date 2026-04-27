@@ -7,11 +7,17 @@ import numpy as np
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QGuiApplication
-from PyQt6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QApplication
+from PyQt6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QMainWindow,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ui.theme import DARK, LIGHT, ThemePalette, apply_theme
 from ui.controls_bar import ControlsBar
-from ui.preview_widget import PreviewWidget
+from ui.preview_widget import PreviewWidget, OcrCanvasWidget
 from ui.transcription_tray import TranscriptionTray
 from ui.history_sidebar import HistorySidebar
 from ui.side_menu import SideMenu
@@ -36,13 +42,25 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("DesktopOCR")
         self.setMinimumSize(900, 600)
         self.resize(1100, 680)
+        self.setWindowFlags(Qt.WindowType.Window)
 
         # Frame queue for preview widget
         self._frame_queue = deque(maxlen=1)
+        self._active_engine_id = "paddle"
+        self._paddle_line_count = 1
 
         # Controls bar (top)
-        self.controls_bar = ControlsBar(["paddle", "easyocr", "windows_ocr"])
-        self.setMenuWidget(self.controls_bar)
+        paddle_variants = [f"paddle-{i}" for i in range(1, 6)]
+        engine_options = paddle_variants + ["windows_ocr", "easyocr"]
+        self.controls_bar = ControlsBar(engine_options)
+        self._top_container = QWidget()
+        top_layout = QHBoxLayout(self._top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(0)
+        top_layout.addWidget(self.controls_bar, 1)
+
+
+        self.setMenuWidget(self._top_container)
         self.controls_bar._menu_btn.raise_()
 
         # Central widget: left column (preview + tray) + right column (history)
@@ -59,9 +77,12 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(0)
 
         self.preview_widget = PreviewWidget(self._frame_queue)
+        self.ocr_canvas = OcrCanvasWidget()
         self.transcription_tray = TranscriptionTray()
+        self.preview_widget.set_line_guides(self.get_active_line_count())
 
         left_layout.addWidget(self.preview_widget, stretch=1)
+        left_layout.addWidget(self.ocr_canvas, stretch=0)
         left_layout.addWidget(self.transcription_tray)
 
         main_layout.addWidget(left_widget, stretch=1)
@@ -78,10 +99,20 @@ class MainWindow(QMainWindow):
         # Side menu overlay (hidden by default)
         self.side_menu = SideMenu(self)
         self.side_menu.setVisible(False)
+        self._menu_overlay = QWidget(self)
+        self._menu_overlay.setObjectName("SideMenuOverlay")
+        self._menu_overlay.setStyleSheet("background: rgba(0, 0, 0, 0);")
+        self._menu_overlay.hide()
+        self._menu_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        def _overlay_click(event):  # noqa: ANN001
+            self._hide_side_menu()
+
+        self._menu_overlay.mousePressEvent = _overlay_click
 
         # Wire internal signals to MainWindow signals
         self.controls_bar.menu_requested.connect(self._toggle_side_menu)
-        self.controls_bar.engine_changed.connect(self.engine_changed.emit)
+        self.controls_bar.engine_changed.connect(self._handle_engine_selection)
         self.controls_bar.select_window_requested.connect(self.select_window_requested.emit)
         self.controls_bar.stop_stream_requested.connect(self.stop_stream_requested.emit)
         self.transcription_tray.recapture_requested.connect(self.recapture_requested.emit)
@@ -92,7 +123,7 @@ class MainWindow(QMainWindow):
         # Wire tray translate button → MainWindow.translate_requested
         self.transcription_tray.translate_requested.connect(self.translate_requested.emit)
         self.side_menu.theme_changed.connect(self._apply_theme)
-        self.side_menu.hide_requested.connect(self.side_menu.hide)
+        self.side_menu.hide_requested.connect(self._hide_side_menu)
 
         # Translation manager — DeepL primary, Google fallback
         self._libre_url = "http://localhost:5000"
@@ -172,14 +203,40 @@ class MainWindow(QMainWindow):
         self.side_menu.set_theme(pal)
         self.status_bar.set_theme(pal)
         self.preview_widget.set_theme(pal)
+        self.ocr_canvas.set_theme(pal)
 
     # --- Side menu positioning ---
 
     def _toggle_side_menu(self):
-        self.side_menu.setVisible(not self.side_menu.isVisible())
+        if self.side_menu.isVisible():
+            self._hide_side_menu()
+        else:
+            self._show_side_menu()
+
+    def _show_side_menu(self):
+        self.side_menu.setVisible(True)
         self._position_side_menu()
+        self._menu_overlay.setGeometry(*self._overlay_geometry())
+        self._menu_overlay.setStyleSheet("background: rgba(0, 0, 0, 40);")
+        self._menu_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self._menu_overlay.show()
+        self._menu_overlay.raise_()
+        self.side_menu.raise_()
+        if hasattr(self.controls_bar, "set_menu_icon"):
+            self.controls_bar.set_menu_icon(True)
+
+    def _hide_side_menu(self):
+        if not self.side_menu.isVisible():
+            return
+        self.side_menu.setVisible(False)
+        self._menu_overlay.hide()
+        self._menu_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        if hasattr(self.controls_bar, "set_menu_icon"):
+            self.controls_bar.set_menu_icon(False)
 
     def _position_side_menu(self):
+        if self._menu_overlay:
+            self._menu_overlay.setGeometry(*self._overlay_geometry())
         if not self.side_menu.isVisible():
             return
         bar_height = self.menuWidget().height() if self.menuWidget() else 48
@@ -196,6 +253,10 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         self._position_side_menu()
 
+    def _overlay_geometry(self):
+        bar_height = self.menuWidget().height() if self.menuWidget() else 0
+        return 0, bar_height, self.width(), self.height() - bar_height
+
     # --- Public API for main.py ---
 
     def set_ocr_result(self, text: str, confidence: float, engine: str, timestamp: str):
@@ -209,10 +270,27 @@ class MainWindow(QMainWindow):
         self._frame_queue.append(frame.copy())
         self._auto_fit_preview_to_frame(frame.shape[1], frame.shape[0])
 
+    def set_ocr_boxes(self, boxes: list | None):
+        self.preview_widget.set_ocr_boxes(boxes)
+        self.ocr_canvas.set_ocr_boxes(boxes)
+
+    def set_ocr_canvas_frames(
+        self,
+        raw_frame: np.ndarray | None,
+        processed_frame: np.ndarray | None,
+        boxes: list | None = None,
+    ):
+        self.ocr_canvas.set_canvas_frames(raw_frame, processed_frame, boxes)
+
+    def set_ocr_canvas_frame(self, frame: np.ndarray | None, boxes: list | None = None):
+        # Back-compat shim
+        self.set_ocr_canvas_frames(frame, frame, boxes)
+
     def clear_preview(self, placeholder: str | None = None, *, clear_selection: bool = False):
         """Remove any queued frames and show a placeholder in the preview widget."""
         self._frame_queue.clear()
         self.preview_widget.clear_frame(placeholder, clear_selection=clear_selection)
+        self.ocr_canvas.clear_canvas()
 
     def set_status(self, status_text: str, summary_text: str):
         self.status_bar.set_status(status_text, summary_text)
@@ -226,6 +304,62 @@ class MainWindow(QMainWindow):
         }
         label = label_map.get(backend, backend.title())
         return label if self._translation_enabled else f"{label} (off)"
+
+    # --- Engine selection helpers ---
+
+    def get_active_engine_id(self) -> str:
+        return self._active_engine_id
+
+    def get_active_line_count(self) -> int:
+        if self._active_engine_id == "paddle":
+            return max(1, int(self._paddle_line_count or 1))
+        return 1
+
+    def set_active_engine(self, engine_id: str, line_count: int | None = None) -> None:
+        selection = self._format_engine_choice(engine_id, line_count)
+        self.controls_bar.set_engine(selection)
+        self._apply_engine_selection(selection, emit_signal=False)
+
+    def _handle_engine_selection(self, selection: str) -> None:  # pragma: no cover - Qt slot
+        self._apply_engine_selection(selection, emit_signal=True)
+
+    def _apply_engine_selection(self, selection: str, *, emit_signal: bool) -> None:
+        base_engine, line_count = self._parse_engine_choice(selection)
+        previous_engine = self._active_engine_id
+        self._active_engine_id = base_engine
+
+        if base_engine == "paddle":
+            self._paddle_line_count = max(1, min(5, line_count))
+        else:
+            self._paddle_line_count = 1
+
+        if hasattr(self, "preview_widget"):
+            self.preview_widget.set_line_guides(self.get_active_line_count())
+
+        if emit_signal and previous_engine != base_engine:
+            self.engine_changed.emit(base_engine)
+
+    def _parse_engine_choice(self, selection: str) -> tuple[str, int]:
+        if not selection:
+            return "paddle", 1
+        selection = selection.strip().lower()
+        if selection.startswith("paddle"):
+            parts = selection.split("-", 1)
+            line_count = 1
+            if len(parts) == 2:
+                try:
+                    line_count = int(parts[1])
+                except ValueError:
+                    line_count = 1
+            return "paddle", max(1, min(5, line_count))
+        return selection, 1
+
+    def _format_engine_choice(self, engine_id: str, line_count: int | None) -> str:
+        if engine_id == "paddle":
+            normalized = line_count if line_count is not None else self.get_active_line_count()
+            normalized = max(1, min(5, int(normalized)))
+            return f"paddle-{normalized}"
+        return engine_id
 
     def request_preview_auto_fit(self) -> None:
         """Allow the next incoming frame to resize the window to match its width."""

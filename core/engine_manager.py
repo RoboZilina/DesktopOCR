@@ -35,6 +35,8 @@ MAX_FALLBACK_BANDS = 2
 MIN_FALLBACK_GAIN_JP_CHARS = 2
 MIN_FALLBACK_GAIN_TEXT_CHARS = 3
 
+_CROP_SAVE_COUNTER = 0
+
 
 def _web_parity_mode_enabled() -> bool:
     return os.getenv("DESKTOCR_WEB_PARITY_MODE", "0") == "1"
@@ -129,6 +131,10 @@ class EasyOCREngine:
         self._reader = None
 
 class EngineManager:
+    def _dbg(self, msg):
+        import logging
+        logging.info(msg)
+
     def __init__(self, models_dir: str, model_config: dict):
         self.models_dir = models_dir
         self.model_config = model_config
@@ -247,32 +253,78 @@ class EngineManager:
         
         return await task
 
-    async def run_ocr(self, image: np.ndarray) -> dict:
+    async def run_ocr(self, image: np.ndarray, line_count: int = 1) -> dict:
         if not self._current_instance:
             logger.error("No active engine to run OCR.")
             return self._normalize_result("", 0.0, {"warning": "no_active_engine"})
             
+        final_text = ""
+        final_conf = 0.0
+        base_meta: dict[str, object] = {}
+        work_image: np.ndarray | None = image
+
         try:
             if self._current_id == "paddle":
-                work_image = preprocess_paddle_slice(image)
-                detected_boxes = await self._current_instance.detect(work_image)
-                boxes_raw = len(detected_boxes)
-                h_img, w_img = work_image.shape[:2]
-                filtered_boxes = self._filter_boxes(detected_boxes, w_img, h_img)
+                line_count = max(1, int(line_count or 1))
+                if line_count == 1:
+                    final_text, final_conf, base_meta, work_image = await self._run_paddle_pass(image, 0)
+                else:
+                    h_total = image.shape[0]
+                    if h_total <= 0:
+                        return self._normalize_result("", 0.0, {"warning": "empty_frame"})
 
-                primary = await self._recognize_box_groups(
-                    work_image,
-                    filtered_boxes,
-                    expand_for_recognition=(os.getenv("DESKTOCR_PADDLE_EXPAND", "1") == "1"),
-                )
-                final_text = (primary.get("text", "") or "").strip()
-                final_conf = float(primary.get("confidence", 0.0) or 0.0)
-                base_meta = {
-                    "boxes_raw": boxes_raw,
-                    "boxes_merged": 0,
-                    "fallback_used": False,
-                    "ocr_chars": len(final_text),
-                }
+                    edges = [int(round(i * h_total / line_count)) for i in range(line_count + 1)]
+                    band_texts: list[str] = []
+                    band_confidences: list[float] = []
+                    aggregated_boxes: list[list[int]] = []
+                    boxes_raw_total = 0
+                    boxes_merged_total = 0
+                    fallback_used = False
+                    ocr_chars_total = 0
+                    processed_frames: list[np.ndarray] = []
+
+                    for idx in range(line_count):
+                        y1 = edges[idx]
+                        y2 = edges[idx + 1]
+                        if (y2 - y1) <= 0:
+                            band_texts.append("")
+                            band_confidences.append(0.0)
+                            continue
+
+                        band_image = image[y1:y2, :, :]
+                        if band_image.size == 0:
+                            band_texts.append("")
+                            band_confidences.append(0.0)
+                            continue
+
+                        band_text, band_conf, band_meta, band_processed = await self._run_paddle_pass(band_image, y1)
+                        band_texts.append(band_text)
+                        band_confidences.append(band_conf)
+                        aggregated_boxes.extend(band_meta.get("boxes", []))
+                        boxes_raw_total += int(band_meta.get("boxes_raw", 0) or 0)
+                        boxes_merged_total += int(band_meta.get("boxes_merged", 0) or 0)
+                        fallback_used = fallback_used or bool(band_meta.get("fallback_used", False))
+                        ocr_chars_total += int(band_meta.get("ocr_chars", len(band_text)))
+                        if isinstance(band_processed, np.ndarray):
+                            processed_frames.append(band_processed)
+
+                    final_text = "\n".join(band_texts).strip()
+                    final_conf = float(sum(band_confidences) / len(band_confidences)) if band_confidences else 0.0
+                    base_meta = {
+                        "boxes_raw": boxes_raw_total,
+                        "boxes_merged": boxes_merged_total,
+                        "fallback_used": fallback_used,
+                        "ocr_chars": ocr_chars_total,
+                        "boxes": aggregated_boxes,
+                        "paddle_line_count": line_count,
+                    }
+                    if processed_frames:
+                        try:
+                            work_image = np.vstack(processed_frames)
+                        except ValueError:
+                            work_image = preprocess_paddle_slice(image)
+                    else:
+                        work_image = preprocess_paddle_slice(image)
             else:
                 work_image = preprocess_natural_slice(image)
                 rec = await self._current_instance.recognize(work_image)
@@ -281,6 +333,7 @@ class EngineManager:
                 base_meta = rec.get("meta", {}) if isinstance(rec, dict) else {}
 
             final_text, validator_meta = self._apply_validator_assist(final_text, final_conf)
+            self._dbg(f"[Validator] {final_text}")
             combined_meta = dict(base_meta) if isinstance(base_meta, dict) else {}
             combined_meta.update(validator_meta)
             self._telemetry["frames"] += 1
@@ -289,10 +342,43 @@ class EngineManager:
             self._telemetry["fallback_hits"] += 0
             self._telemetry["ocr_chars"] += len(final_text)
 
-            return self._normalize_result(final_text, final_conf, combined_meta)
+            result = self._normalize_result(final_text, final_conf, combined_meta)
+            if isinstance(work_image, np.ndarray) and work_image.size > 0:
+                result["preprocessed_frame"] = work_image.copy()
+            return result
         except Exception as e:
             logger.error(f"Error running OCR pipeline: {e}")
             return self._normalize_result("", 0.0, {"warning": str(e)})
+
+    async def _run_paddle_pass(self, image: np.ndarray, y_offset: int) -> tuple[str, float, dict, np.ndarray]:
+        work_image = preprocess_paddle_slice(image)
+        detected_boxes = await self._current_instance.detect(work_image)
+        boxes_raw = len(detected_boxes)
+        h_img, w_img = work_image.shape[:2]
+        filtered_boxes = self._filter_boxes(detected_boxes, w_img, h_img)
+
+        primary = await self._recognize_box_groups(
+            work_image,
+            filtered_boxes,
+            expand_for_recognition=(os.getenv("DESKTOCR_PADDLE_EXPAND", "1") == "1"),
+        )
+        final_text = (primary.get("text", "") or "").strip()
+        final_conf = float(primary.get("confidence", 0.0) or 0.0)
+        offset_boxes: list[list[int]] = []
+        for box in filtered_boxes:
+            if len(box) < 4:
+                continue
+            x1, y1, x2, y2 = box
+            offset_boxes.append([x1, y1 + y_offset, x2, y2 + y_offset])
+
+        meta = {
+            "boxes_raw": boxes_raw,
+            "boxes_merged": 0,
+            "fallback_used": False,
+            "ocr_chars": len(final_text),
+            "boxes": offset_boxes,
+        }
+        return final_text, final_conf, meta, work_image
 
     def _apply_validator_assist(self, text: str, confidence: float) -> tuple[str, dict]:
         if not text:
@@ -323,6 +409,7 @@ class EngineManager:
             "boxes_merged": 0,
             "fallback_used": False,
             "ocr_chars": len(text or ""),
+            "boxes": [],
         }
         if isinstance(meta, dict):
             normalized_meta.update(meta)
@@ -350,16 +437,13 @@ class EngineManager:
         if bw < 4 or bh < 4:
             return None
 
-        # Keep web-style asymmetry while adding modest size-aware margin.
-        pad_l = max(PAD_LEFT // 2, int(round(bw * 0.03)))
-        pad_r = max(PAD_RIGHT // 2, int(round(bw * 0.02)))
-        pad_t = max(PAD_TOP, int(round(bh * 0.18)))
-        pad_b = max(PAD_BOTTOM, int(round(bh * 0.18)))
-
-        ex1 = max(0, x1 - pad_l)
-        ey1 = max(0, y1 - pad_t)
-        ex2 = min(w, x2 + pad_r)
-        ey2 = min(h, y2 + pad_b)
+        # VN-optimized tight crop: anisotropic padding to avoid clipping kana.
+        pad_x = 2
+        pad_y = 8
+        ex1 = max(0, x1 - pad_x)
+        ey1 = max(0, y1 - pad_y)
+        ex2 = min(w, x2 + pad_x)
+        ey2 = min(h, y2 + pad_y)
 
         if (ex2 - ex1) < 4 or (ey2 - ey1) < 4:
             return None
@@ -417,6 +501,8 @@ class EngineManager:
             h,
         )
 
+        self._dbg(f"[Filter] Kept boxes: {kept}")
+
         return kept
 
     def _merge_horizontal_boxes(self, boxes: list, y_tol: int) -> list[list[int]]:
@@ -449,6 +535,13 @@ class EngineManager:
         merged.sort(key=lambda b: (b[1], b[0]))
         return merged
 
+    def _sort_paddle_boxes(self, boxes):
+        """
+        Sort simple rectangular boxes [x1, y1, x2, y2]
+        by top-most Y, then left-most X.
+        """
+        return sorted(boxes, key=lambda b: (b[1], b[0]))
+
     async def _recognize_box_groups(self, image: np.ndarray, boxes: list[list[int]], expand_for_recognition: bool = True) -> dict:
         if not boxes:
             return {"text": "", "confidence": 0.0}
@@ -456,13 +549,17 @@ class EngineManager:
         logger.debug("OCR: starting recognition for %d boxes", len(boxes))
 
         h, w = image.shape[:2]
+        import logging
+        logging.info(f"[PaddleDebug] Raw boxes before sort: {boxes}")
         texts: list[str] = []
         confidences: list[float] = []
 
         import os
         _REC_MIN_CONF = float(os.getenv("DESKTOCR_REC_MIN_CONF", "0.50"))
 
-        boxes = sorted(boxes, key=lambda b: b[0])
+        boxes = self._sort_paddle_boxes(boxes)
+        self._dbg(f"[Recognize] Sorted boxes: {boxes}")
+        logging.info(f"[PaddleDebug] Boxes after sort: {boxes}")
         logger.debug("OCR: sorted boxes = %s", boxes)
         for box in boxes:
             if expand_for_recognition:
@@ -474,9 +571,11 @@ class EngineManager:
                     continue
                 x1, y1, x2, y2 = expanded
                 logger.debug("OCR: processing box %s", (x1, y1, x2, y2))
+                self._dbg(f"[Crop] {(x1, y1, x2, y2)} size={(x2-x1)}x{(y2-y1)}")
                 bw = x2 - x1
                 bh = y2 - y1
                 crop = image[y1:y2, x1:x2].copy()
+                logging.info(f"[PaddleDebug] Crop box: {(x1, y1, x2, y2)}")
             else:
                 # Web parity crop semantics (Canvas drawImage-style):
                 # keep float box coords, round width/height, then sample.
@@ -485,8 +584,11 @@ class EngineManager:
                 x2 = max(0.0, min(float(w), float(box[2])))
                 y2 = max(0.0, min(float(h), float(box[3])))
                 logger.debug("OCR: processing box %s", (x1, y1, x2, y2))
+                self._dbg(f"[Crop] {(x1, y1, x2, y2)} size={(x2-x1)}x{(y2-y1)}")
                 bw = x2 - x1
                 bh = y2 - y1
+                crop = image[y1:y2, x1:x2].copy()
+                logger.debug("[Rec] crop=%dx%d (expand=%s)", crop.shape[1] if crop is not None else 0, crop.shape[0] if crop is not None else 0, expand_for_recognition)
                 if bw <= 0.0 or bh <= 0.0:
                     continue
 
@@ -511,16 +613,44 @@ class EngineManager:
                 if dst_w != src_w or dst_h != src_h:
                     crop = cv2.resize(crop, (dst_w, dst_h), interpolation=cv2.INTER_LINEAR)
 
+            if os.getenv("DESKTOCR_SAVE_CROPS", "0") == "1" and crop is not None and crop.size > 0:
+                global _CROP_SAVE_COUNTER
+                _CROP_SAVE_COUNTER += 1
+                os.makedirs("debug_crops", exist_ok=True)
+                crop_path = os.path.join(
+                    "debug_crops",
+                    f"crop_{_CROP_SAVE_COUNTER}_{int(round(x1))}_{int(round(y1))}.png",
+                )
+                try:
+                    cv2.imwrite(crop_path, crop)
+                except Exception as exc:
+                    self._dbg(f"[CropSaveError] {exc}")
+
             logger.debug("OCR: crop size = %dx%d", bw, bh)
             res = await self._current_instance.recognize(crop)
             text = res.get("text", "").strip()
             conf = float(res.get("confidence", 0.0) or 0.0)
+            if text:
+                total_chars = len(text)
+                if total_chars > 0:
+                    jp_chars = score_japanese_density(text)
+                    jp_ratio = float(jp_chars) / float(total_chars)
+                    if jp_chars == 0:
+                        self._dbg(f"[RecSkip] No JP chars -> '{text}'")
+                        continue
+                    if jp_ratio < 0.30:
+                        self._dbg(f"[RecKeep] Low density but has JP chars ({jp_ratio:.2f}) -> '{text}'")
+            self._dbg(f"[Rec] '{text}' conf={conf}")
             logger.debug("[RecResult] text='%s' conf=%.2f", text, conf)
             logger.debug("OCR: recognized text = '%s' (confidence=%s)", text, conf)
             if text:
+                logging.info(f"[PaddleDebug] Recognized: '{text}' conf={conf}")
                 texts.append(text)
                 confidences.append(conf)
 
+        final_text = "\n".join(texts) if texts else ""
+        self._dbg(f"[Final] {final_text}")
+        logging.info(f"[PaddleDebug] Final merged text:\n{final_text}")
         avg_conf = float(sum(confidences) / len(confidences)) if confidences else 0.0
         return {"text": final_text, "confidence": avg_conf}
 
@@ -620,6 +750,7 @@ class EngineManager:
             text = best_band.get("text", "").strip()
             conf = float(best_band.get("confidence", 0.0) or 0.0)
             if text:
+                logging.info(f"[PaddleDebug] Recognized: '{text}' conf={conf}")
                 texts.append(text)
                 confidences.append(conf)
 

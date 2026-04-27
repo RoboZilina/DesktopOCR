@@ -30,7 +30,8 @@ class StatusBar(QStatusBar):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Minimum,
         )
-        self._status_label.setMinimumHeight(0)
+        line_spacing = self._status_label.fontMetrics().lineSpacing()
+        self._status_label.setMinimumHeight(int(line_spacing * 2.2))
         layout.addWidget(self._status_label)
 
         self.addPermanentWidget(container, 1)

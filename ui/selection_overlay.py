@@ -25,6 +25,7 @@ class SelectionOverlay(QWidget):
         self._selection_norm: tuple[float, float, float, float] | None = None
         self._last_valid_norm: tuple[float, float, float, float] | None = None
         self._dragging = False
+        self._line_band_count = 1
 
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setAutoFillBackground(False)
@@ -154,6 +155,23 @@ class SelectionOverlay(QWidget):
         painter.drawRect(QRectF(rect.left(), rect.bottom() - accent, accent, accent))
         painter.drawRect(QRectF(rect.right() - accent, rect.bottom() - accent, accent, accent))
 
+        self._draw_guides(painter, rect)
+
+    def _draw_guides(self, painter: QPainter, rect: QRectF):
+        if self._line_band_count <= 1:
+            return
+        pen = QPen(QColor(255, 255, 255, 170))
+        pen.setWidth(1)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        steps = max(1, self._line_band_count)
+        for idx in range(1, steps):
+            y = rect.top() + (rect.height() * idx / steps)
+            painter.drawLine(
+                QPointF(rect.left() + 1, y),
+                QPointF(rect.right() - 1, y),
+            )
+
     # ------------------------------------------------------------------
     # External API
     # ------------------------------------------------------------------
@@ -171,4 +189,11 @@ class SelectionOverlay(QWidget):
         self._start_overlay = None
         self._current_overlay = None
         self._dragging = False
+        self.update()
+
+    def set_line_band_count(self, count: int):
+        new_count = max(1, int(count or 1))
+        if new_count == self._line_band_count:
+            return
+        self._line_band_count = new_count
         self.update()

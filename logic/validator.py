@@ -266,8 +266,8 @@ def _final_normalize(text: str) -> str:
     text = text.replace('\u3000', ' ')
     # Normalize whitespace
     text = re.sub(r'\s+', ' ', text)
-    # Strip lone Latin letters
-    text = re.sub(r'(?i)(?<![a-z0-9])[a-z](?![a-z0-9])', '', text)
+    # Strip lone Latin letters unless they touch CJK characters
+    text = re.sub(r'(?i)(?<![a-z0-9\u3040-\u9fff])[a-z](?![a-z0-9\u3040-\u9fff])', '', text)
     return text.strip()
 
 def clean_ocr_output_enhanced(text: str) -> str:

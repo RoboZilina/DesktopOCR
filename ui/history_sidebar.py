@@ -117,16 +117,15 @@ class HistorySidebar(QWidget):
         # Header
         self._header = QWidget()
         self._header.setFixedHeight(48)
-        self._header.setStyleSheet(
-            "background: transparent; border-bottom: 1px solid transparent;"
-        )
+        self._header.setObjectName("section_header")
+        self._header.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self._header.setStyleSheet("background: transparent; border: none;")
         h_layout = QHBoxLayout(self._header)
         h_layout.setContentsMargins(16, 0, 16, 0)
         title = QLabel("HISTORY")
-        title.setStyleSheet(
-            "color: #a1a1aa; font-size: 12px; "
-            "font-weight: bold; letter-spacing: 1px;"
-        )
+        title.setObjectName("section_header")
+        title.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        title.setStyleSheet("background: transparent; border: none;")
         h_layout.addWidget(title)
         h_layout.addStretch()
 
@@ -167,9 +166,7 @@ class HistorySidebar(QWidget):
         self._pal = pal
         # Update own styles
         self.setStyleSheet(f"background: {pal.bg};")
-        self._header.setStyleSheet(
-            f"background: {pal.panel}; border-bottom: 1px solid {pal.border};"
-        )
+        self._header.setStyleSheet("background: transparent; border: none;")
         self._container.setStyleSheet(f"background: {pal.bg};")
         self._scroll.setStyleSheet(
             f"QScrollArea {{ border: none; background: {pal.bg}; }}"
@@ -185,8 +182,7 @@ class HistorySidebar(QWidget):
         for lbl in self.findChildren(QLabel):
             if lbl.text() == "HISTORY":
                 lbl.setStyleSheet(
-                    f"color: {pal.text_dim}; font-size: 12px; "
-                    f"font-weight: bold; letter-spacing: 1px;"
+                    f"color: {pal.text_dim}; font-size: 12px; font-weight: bold; letter-spacing: 1px; background: transparent; border: none;"
                 )
         # Update all existing cards
         for i in range(self._cards_layout.count() - 1):  # skip stretch

@@ -189,6 +189,19 @@ def _capture_bitblt(hwnd: int) -> Optional[np.ndarray]:
         if width <= 0 or height <= 0:
             return None
 
+        dpi_scale = 1.0
+        try:
+            dpi = user32.GetDpiForWindow(hwnd)
+            if dpi > 0:
+                dpi_scale = dpi / 96.0
+        except Exception:
+            dpi_scale = 1.0
+
+        width = int(round(width * dpi_scale))
+        height = int(round(height * dpi_scale))
+        if width <= 0 or height <= 0:
+            return None
+
         # Device contexts
         hwnd_dc = user32.GetDC(hwnd)
         mem_dc = gdi32.CreateCompatibleDC(hwnd_dc)
@@ -291,6 +304,9 @@ class ScreenCapture:
         # Fallback flag — set True if WinRT init fails
         self._use_bitblt: bool = False
 
+        # Per-window DPI scale (logical → physical). Lazily populated when region set.
+        self._dpi_scale: Optional[float] = None
+
         log.debug("ScreenCapture created for HWND=0x%X", hwnd)
 
     # ------------------------------------------------------------------
@@ -299,8 +315,25 @@ class ScreenCapture:
 
     def set_region(self, x: int, y: int, width: int, height: int) -> None:
         """Define the sub-region (in window client coordinates) to crop from each frame."""
-        self._region = (int(x), int(y), int(width), int(height))
-        log.debug("Capture region set: x=%d y=%d w=%d h=%d", x, y, width, height)
+        if self._dpi_scale is None:
+            scale = 1.0
+            try:
+                dpi = ctypes.windll.user32.GetDpiForWindow(self._hwnd)
+                if dpi > 0:
+                    scale = dpi / 96.0
+            except Exception:
+                scale = 1.0
+            self._dpi_scale = scale
+        else:
+            scale = self._dpi_scale
+
+        sx = int(round(x * scale))
+        sy = int(round(y * scale))
+        sw = max(1, int(round(width * scale)))
+        sh = max(1, int(round(height * scale)))
+
+        self._region = (sx, sy, sw, sh)
+        log.debug("Capture region set (scaled): x=%d y=%d w=%d h=%d", sx, sy, sw, sh)
 
     @property
     def region(self):

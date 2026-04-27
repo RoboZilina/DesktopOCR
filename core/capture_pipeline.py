@@ -48,6 +48,7 @@ class CapturePipeline:
         
         self._auto_task = None
         self.multi_pass_enabled = False
+        self._line_count: int = 1
         self._stats = {
             "frames": 0,
             "boxes_raw": 0,
@@ -57,7 +58,14 @@ class CapturePipeline:
         }
         self._stats_log_every = 20
 
-    async def capture_once(self) -> dict | None:
+    def set_line_count(self, n: int) -> None:
+        try:
+            value = int(n)
+        except (TypeError, ValueError):
+            value = 1
+        self._line_count = max(1, value)
+
+    async def capture_once(self, *, line_count: int = 1) -> dict | None:
         """
         Captures a frame and processes it via the OCR engine.
         Returns {"text": str, "confidence": float} or None.
@@ -82,7 +90,7 @@ class CapturePipeline:
                 res = await self._run_google_vision(frame)
 
             if res is None:
-                res = await self.engine_manager.run_ocr(frame)
+                res = await self.engine_manager.run_ocr(frame, line_count=line_count)
             
             if self.capture_generation != my_gen:
                 return None
@@ -94,8 +102,8 @@ class CapturePipeline:
             text, meta = await self._apply_ai_validators(text, meta)
             res["text"] = text
             res["meta"] = meta
-            
             conf = res.get("confidence")
+            res["confidence"] = conf if conf is not None else 0.0
             self._update_stats(meta)
 
             if not text:
@@ -105,10 +113,15 @@ class CapturePipeline:
             self._last_result = text
             self._stats["chars_emitted"] += len(text)
             self._maybe_log_stats()
+            if isinstance(res, dict):
+                res["frame"] = frame.copy()
+                return res
+
             return {
                 "text": text,
                 "confidence": conf if conf is not None else 0.0,
                 "meta": meta,
+                "frame": frame.copy(),
             }
             
         except Exception as e:
@@ -206,7 +219,7 @@ class CapturePipeline:
             while True:
                 await asyncio.sleep(interval)
                 
-                res = await self.capture_once()
+                res = await self.capture_once(line_count=self._line_count)
                 if res is not None:
                     result_gen = self.capture_generation
                     # New valid result detected: wait for stabilization
@@ -229,7 +242,7 @@ class CapturePipeline:
             
         self.is_processing = False
 
-    async def _multi_pass(self, frame, my_gen) -> dict | None:
+    async def _multi_pass(self, frame, my_gen, line_count: int) -> dict | None:
         """
         Execute OCR pass 5 times and perform voting on the output.
         """
@@ -238,7 +251,7 @@ class CapturePipeline:
         # Wire up vision.py preprocessing variants here when implemented.
         results = []
         for _ in range(5):
-            res = await self.engine_manager.run_ocr(frame)
+            res = await self.engine_manager.run_ocr(frame, line_count=line_count)
             if self.capture_generation != my_gen:
                 return None
                 

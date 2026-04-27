@@ -39,8 +39,7 @@ class TranscriptionTray(QWidget):
 
         # --- OCR output row ---
         ocr_header = QHBoxLayout()
-        ocr_label = QLabel("OCR Output")
-        ocr_label.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        ocr_label = self._make_header_label("OCR Output")
         ocr_header.addWidget(ocr_label)
         ocr_header.addStretch()
 
@@ -69,8 +68,7 @@ class TranscriptionTray(QWidget):
 
         # --- Selection row ---
         sel_header = QHBoxLayout()
-        sel_label = QLabel("Selection")
-        sel_label.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        sel_label = self._make_header_label("Selection")
         sel_header.addWidget(sel_label)
         sel_header.addStretch()
 
@@ -111,8 +109,7 @@ class TranscriptionTray(QWidget):
 
         # --- Full translation row ---
         trans_header = QHBoxLayout()
-        trans_label = QLabel("Translation")
-        trans_label.setStyleSheet("color: #a1a1aa; font-size: 11px;")
+        trans_label = self._make_header_label("Translation")
         trans_header.addWidget(trans_label)
         trans_header.addStretch()
         layout.addLayout(trans_header)
@@ -188,7 +185,7 @@ class TranscriptionTray(QWidget):
         self.setStyleSheet(f"background: {pal.panel}; border-top: 1px solid {pal.border};")
         # Re-apply label colors
         for lbl in (self.findChildren(QLabel)):
-            lbl.setStyleSheet(f"color: {pal.text_dim}; font-size: 11px;")
+            lbl.setStyleSheet(f"color: {pal.text_dim}; font-size: 11px; background: transparent;")
         # Re-apply text areas
         if hasattr(self, '_current_font_size'):
             self.set_text_size(self._current_font_size)
@@ -247,6 +244,13 @@ class TranscriptionTray(QWidget):
                 padding: 6px;
             }}
         """)
+
+    def _make_header_label(self, text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setObjectName("section_header")
+        lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        lbl.setStyleSheet("background: transparent; border: none;")
+        return lbl
 
     def get_ocr_text(self) -> str:
         return self._ocr_text.toPlainText()

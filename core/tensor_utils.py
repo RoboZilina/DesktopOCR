@@ -106,19 +106,20 @@ def image_to_rec_tensor(image: np.ndarray) -> np.ndarray:
     target_h = 48
     max_w = 320
     h, w = source.shape[:2]
-    
+
     # Scale to height=48 EXACTLY, preserve aspect ratio for width
     scale = target_h / h
     new_w = min(max_w, max(1, int(round(w * scale))))
-    
+
     resized = cv2.resize(source, (new_w, target_h), interpolation=cv2.INTER_LINEAR)
-    
+
     canvas = np.zeros((target_h, max_w, 3), dtype=np.uint8)
     canvas[:, :new_w] = resized
-    
+
     # Normalize: same as above
     img_float = canvas.astype(np.float32)
     img_float = (img_float / 255.0 - 0.5) / 0.5
+
     
     # HWC to CHW
     img_chw = img_float.transpose(2, 0, 1)
@@ -139,12 +140,6 @@ def crop_box(image: np.ndarray, box: list) -> np.ndarray | None:
         return None
 
     x1, y1, x2, y2 = box
-    
-    # Apply same padding from instructions.md
-    x1 -= PAD_LEFT
-    y1 -= PAD_TOP
-    x2 += PAD_RIGHT
-    y2 += PAD_BOTTOM
     
     # Clamp to image bounds
     h_img, w_img = image.shape[:2]

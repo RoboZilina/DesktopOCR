@@ -4,6 +4,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+def _scale_hex_color(color: str, factor: float) -> str:
+    color = color.lstrip("#")
+    if len(color) != 6:
+        return f"#{color}"
+    r = int(color[0:2], 16)
+    g = int(color[2:4], 16)
+    b = int(color[4:6], 16)
+    r = max(0, min(255, int(r * factor)))
+    g = max(0, min(255, int(g * factor)))
+    b = max(0, min(255, int(b * factor)))
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
 @dataclass(frozen=True)
 class ThemePalette:
     bg: str
@@ -59,6 +72,12 @@ def load_qss_template() -> str:
 
 def apply_theme(app, pal: ThemePalette):
     template = load_qss_template()
+    hover = pal.accent_glow
+    pressed = pal.accent
+    accent_dark = _scale_hex_color(pal.accent, 0.85)
+    disabled_bg = pal.border if pal.is_dark else "#e5e7eb"
+    disabled_fg = pal.text_dim
+    disabled_border = pal.border
     qss = (
         template
         .replace("{BG}", pal.bg)
@@ -69,5 +88,11 @@ def apply_theme(app, pal: ThemePalette):
         .replace("{TEXT_DIM}", pal.text_dim)
         .replace("{TEXT_SECONDARY}", pal.text_secondary)
         .replace("{BORDER}", pal.border)
+        .replace("{HOVER}", hover)
+        .replace("{PRESSED}", pressed)
+        .replace("{ACCENT_DARK}", accent_dark)
+        .replace("{DISABLED_BG}", disabled_bg)
+        .replace("{DISABLED_FG}", disabled_fg)
+        .replace("{DISABLED_BORDER}", disabled_border)
     )
     app.setStyleSheet(qss)

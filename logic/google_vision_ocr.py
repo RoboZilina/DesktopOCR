@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from typing import Any
+from typing import Any, Callable
 
 import aiohttp
 
@@ -23,6 +23,7 @@ class GoogleVisionOCR:
         self._client: aiohttp.ClientSession | None = None
         self._lock = asyncio.Lock()
         self._invalid_key_logged = False
+        self._status_callback: Callable[[str, str], None] | None = None
 
     def update_settings(self, *, api_key: str | None = None, enabled: bool | None = None) -> None:
         """Update BYOK configuration at runtime."""
@@ -36,6 +37,13 @@ class GoogleVisionOCR:
 
     def is_enabled(self) -> bool:
         return bool(self._enabled and self.api_key)
+
+    def set_status_callback(self, callback: Callable[[str, str], None] | None) -> None:
+        self._status_callback = callback
+
+    def _notify_error(self, message: str) -> None:
+        if self._status_callback:
+            self._status_callback("Error", f"Google Vision: {message}")
 
     async def close(self) -> None:
         if self._client and not self._client.closed:
@@ -76,6 +84,7 @@ class GoogleVisionOCR:
                         return text.strip() if text else None
 
                     if response.status in (400, 401, 403):
+                        self._notify_error(f"HTTP {response.status}")
                         if not self._invalid_key_logged:
                             logger.warning(
                                 "Google Vision OCR auth failed (status %s). Verify your API key.",
@@ -88,6 +97,7 @@ class GoogleVisionOCR:
                         "Google Vision OCR returned status %s — falling back to local engine",
                         response.status,
                     )
+                    self._notify_error(f"HTTP {response.status}")
                     return None
 
             except asyncio.TimeoutError:
@@ -104,10 +114,12 @@ class GoogleVisionOCR:
 
         first = responses[0]
         if "error" in first:
+            error_msg = first.get("error", {}).get("message", "unknown")
             logger.warning(
                 "Google Vision OCR response error: %s",
-                first.get("error", {}).get("message", "unknown"),
+                error_msg,
             )
+            self._notify_error(error_msg)
             return None
 
         annotations = first.get("textAnnotations") or []

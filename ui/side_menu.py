@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QFrame, QSizePolicy, QLineEdit, QScrollArea, QComboBox,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from ui.theme import ThemePalette, DARK, LIGHT
 
 
@@ -44,6 +44,9 @@ class SideMenu(QWidget):
         self.setAutoFillBackground(True)
         self._auto_read_toggle: tuple[QPushButton, QPushButton] | None = None
         self._auto_translate_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._openai_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._deepseek_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._google_vision_toggle: tuple[QPushButton, QPushButton] | None = None
 
         # Outer layout: just holds the scroll area
         outer = QVBoxLayout(self)
@@ -65,16 +68,18 @@ class SideMenu(QWidget):
 
         # All items go into this layout
         layout = QVBoxLayout(content)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(12)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
 
         # Header
-        self._header = QLabel("SIDE MENU")
+        self._header = self._create_section_header("SIDE MENU")
+        self._header.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._header.installEventFilter(self)
         layout.addWidget(self._header)
         layout.addWidget(self._divider())
 
         # Theme toggle
-        layout.addWidget(QLabel("Theme"))
+        layout.addWidget(self._create_section_header("Theme"))
         theme_row = QHBoxLayout()
         self._theme_btns = {}
         for label, tid in [("Auto", "auto"), ("Dark", "dark"), ("Light", "light")]:
@@ -112,7 +117,7 @@ class SideMenu(QWidget):
 
         # --- Translation section ---
         layout.addWidget(self._divider())
-        layout.addWidget(QLabel("Translation"))
+        layout.addWidget(self._create_section_header("Translation"))
         self._add_toggle_section(
             layout, "Enable Translation",
             self.translation_enabled_changed, default=True
@@ -124,7 +129,7 @@ class SideMenu(QWidget):
             default=False,
         )
 
-        layout.addWidget(QLabel("Backend"))
+        layout.addWidget(self._create_section_header("Backend"))
         backend_row = QHBoxLayout()
         self._backend_btns: dict[str, QPushButton] = {}
         for label, bid in [("Auto", "auto"), ("DeepL", "deepl"), ("Google", "google")]:
@@ -143,7 +148,7 @@ class SideMenu(QWidget):
         backend_row.addStretch()
         layout.addLayout(backend_row)
 
-        self._libre_url_label = QLabel("LibreTranslate URL")
+        self._libre_url_label = self._create_section_header("LibreTranslate URL")
         self._libre_url_label.hide()
         layout.addWidget(self._libre_url_label)
         self._libre_url_edit = QLineEdit("http://localhost:5000")
@@ -156,7 +161,7 @@ class SideMenu(QWidget):
 
         # AI Validator
         layout.addWidget(self._divider())
-        self._add_toggle_section(
+        self._openai_toggle = self._add_toggle_section(
             layout, "AI Validator",
             self.openai_validator_enabled_changed,
             default=False
@@ -167,7 +172,7 @@ class SideMenu(QWidget):
         openai_form.setContentsMargins(0, 0, 0, 0)
         openai_form.setSpacing(6)
 
-        openai_form.addWidget(QLabel("OpenAI API Key"))
+        openai_form.addWidget(self._create_section_header("OpenAI API Key"))
         self._openai_api_key_edit = QLineEdit()
         self._openai_api_key_edit.setPlaceholderText("sk-...")
         self._openai_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -176,7 +181,7 @@ class SideMenu(QWidget):
         )
         openai_form.addWidget(self._openai_api_key_edit)
 
-        openai_form.addWidget(QLabel("OpenAI Model"))
+        openai_form.addWidget(self._create_section_header("OpenAI Model"))
         self._openai_model_combo = QComboBox()
         self._openai_model_combo.addItems(["gpt-4o-mini", "gpt-4o"])
         self._openai_model_combo.currentTextChanged.connect(self.openai_model_changed.emit)
@@ -192,8 +197,8 @@ class SideMenu(QWidget):
 
         # DeepSeek Validator (Budget Mode)
         layout.addWidget(self._divider())
-        layout.addWidget(QLabel("DeepSeek Validator (Budget Mode)"))
-        self._add_toggle_section(
+        layout.addWidget(self._create_section_header("DeepSeek Validator (Budget Mode)"))
+        self._deepseek_toggle = self._add_toggle_section(
             layout,
             "Enable DeepSeek",
             self.deepseek_validator_enabled_changed,
@@ -211,7 +216,7 @@ class SideMenu(QWidget):
         deepseek_desc.setStyleSheet("color: #a0a0aa; font-size: 11px; margin-top: 0;")
         deepseek_form.addWidget(deepseek_desc)
 
-        deepseek_form.addWidget(QLabel("DeepSeek API Key"))
+        deepseek_form.addWidget(self._create_section_header("DeepSeek API Key"))
         self._deepseek_api_key_edit = QLineEdit()
         self._deepseek_api_key_edit.setPlaceholderText("ds-...")
         self._deepseek_api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -222,7 +227,7 @@ class SideMenu(QWidget):
         )
         deepseek_form.addWidget(self._deepseek_api_key_edit)
 
-        deepseek_form.addWidget(QLabel("DeepSeek Model"))
+        deepseek_form.addWidget(self._create_section_header("DeepSeek Model"))
         self._deepseek_model_combo = QComboBox()
         self._deepseek_model_combo.addItems(["deepseek-chat"])
         self._deepseek_model_combo.currentTextChanged.connect(
@@ -236,8 +241,8 @@ class SideMenu(QWidget):
 
         # Cloud OCR (Google Vision)
         layout.addWidget(self._divider())
-        layout.addWidget(QLabel("Cloud OCR (Google Vision)"))
-        self._add_toggle_section(
+        layout.addWidget(self._create_section_header("Cloud OCR (Google Vision)"))
+        self._google_vision_toggle = self._add_toggle_section(
             layout,
             "Enable Cloud OCR",
             self.google_vision_enabled_changed,
@@ -255,7 +260,7 @@ class SideMenu(QWidget):
         desc.setStyleSheet("color: #a0a0aa; font-size: 11px; margin-top: 0;")
         cloud_form.addWidget(desc)
 
-        cloud_form.addWidget(QLabel("Google Vision API Key"))
+        cloud_form.addWidget(self._create_section_header("Google Vision API Key"))
         self._google_vision_key_edit = QLineEdit()
         self._google_vision_key_edit.setPlaceholderText("AIza...")
         self._google_vision_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
@@ -272,7 +277,7 @@ class SideMenu(QWidget):
 
         # Text size preset (font)
         layout.addWidget(self._divider())
-        layout.addWidget(QLabel("Text Size"))
+        layout.addWidget(self._create_section_header("Text Size"))
         size_row = QHBoxLayout()
         self._size_btns = {}
         for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
@@ -290,7 +295,7 @@ class SideMenu(QWidget):
         layout.addLayout(size_row)
 
         # Text area size preset (tray height)
-        layout.addWidget(QLabel("Text Area Size"))
+        layout.addWidget(self._create_section_header("Text Area Size"))
         tray_row = QHBoxLayout()
         self._tray_size_btns = {}
         for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
@@ -321,7 +326,7 @@ class SideMenu(QWidget):
         adv_panel_layout = QVBoxLayout(self._advanced_panel)
         adv_panel_layout.setContentsMargins(0, 4, 0, 0)
         adv_panel_layout.setSpacing(6)
-        adv_panel_layout.addWidget(QLabel("Diff Threshold"))
+        adv_panel_layout.addWidget(self._create_section_header("Diff Threshold"))
         self._threshold_label = QLabel("8")
         self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
         self._threshold_slider.setMinimum(1)
@@ -358,6 +363,12 @@ class SideMenu(QWidget):
 
         # Apply initial stylesheet
         self._apply_base_style()
+
+    def eventFilter(self, obj, event):
+        if obj is self._header and event.type() == QEvent.Type.MouseButtonRelease:
+            self.hide_requested.emit()
+            return True
+        return super().eventFilter(obj, event)
 
     def _apply_base_style(self):
         pal = getattr(self, '_pal', None)
@@ -496,6 +507,13 @@ class SideMenu(QWidget):
         line.setStyleSheet(f"background: {border}; max-height: 1px; margin-top: 12px; margin-bottom: 12px; opacity: 0.5;")
         return line
 
+    def _create_section_header(self, text: str) -> QLabel:
+        header = QLabel(text)
+        header.setObjectName("section_header")
+        header.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        header.setStyleSheet("background: transparent; border: none;")
+        return header
+
     def _on_theme_clicked(self, theme_id: str):
         for tid, btn in self._theme_btns.items():
             btn.setChecked(tid == theme_id)
@@ -539,8 +557,12 @@ class SideMenu(QWidget):
 
     def _add_toggle_section(self, layout, title: str,
                            signal: pyqtSignal, default: bool):
-        layout.addWidget(QLabel(title))
+        header = self._create_section_header(title)
+        header.setContentsMargins(0, 4, 0, 2)
+        layout.addWidget(header)
         row = QHBoxLayout()
+        row.setContentsMargins(0, 2, 0, 2)
+        row.setSpacing(4)
         on_btn = QPushButton("On")
         off_btn = QPushButton("Off")
         on_btn.setProperty("menuClass", "option-btn")
@@ -594,6 +616,63 @@ class SideMenu(QWidget):
         self._set_toggle_state(self._auto_translate_toggle, enabled)
         if emit_signal:
             self.auto_translate_selection_changed.emit(enabled)
+
+    def set_openai_validator_enabled(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._openai_toggle, enabled)
+        if hasattr(self, "_openai_details"):
+            self._openai_details.setVisible(enabled)
+        if emit_signal:
+            self.openai_validator_enabled_changed.emit(enabled)
+
+    def set_openai_api_key(self, key: str) -> None:
+        if hasattr(self, "_openai_api_key_edit"):
+            self._openai_api_key_edit.setText(key or "")
+
+    def set_openai_model(self, model: str) -> None:
+        if not hasattr(self, "_openai_model_combo"):
+            return
+        combo = self._openai_model_combo
+        block = combo.blockSignals(True)
+        idx = combo.findText(model)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(block)
+
+    def set_deepseek_validator_enabled(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._deepseek_toggle, enabled)
+        if hasattr(self, "_deepseek_details"):
+            self._deepseek_details.setVisible(enabled)
+        if emit_signal:
+            self.deepseek_validator_enabled_changed.emit(enabled)
+
+    def set_deepseek_api_key(self, key: str) -> None:
+        if hasattr(self, "_deepseek_api_key_edit"):
+            self._deepseek_api_key_edit.setText(key or "")
+
+    def set_deepseek_model(self, model: str) -> None:
+        if not hasattr(self, "_deepseek_model_combo"):
+            return
+        combo = self._deepseek_model_combo
+        block = combo.blockSignals(True)
+        idx = combo.findText(model)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(block)
+
+    def set_google_vision_enabled(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._google_vision_toggle, enabled)
+        if hasattr(self, "_google_vision_details"):
+            self._google_vision_details.setVisible(enabled)
+        if emit_signal:
+            self.google_vision_enabled_changed.emit(enabled)
+
+    def set_google_vision_api_key(self, key: str) -> None:
+        if hasattr(self, "_google_vision_key_edit"):
+            self._google_vision_key_edit.setText(key or "")
 
     def _set_advanced_visible(self, visible: bool) -> None:
         if not hasattr(self, "_advanced_panel"):
