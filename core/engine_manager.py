@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import math
+from collections import deque
 import cv2
 import numpy as np
 
@@ -59,6 +60,13 @@ _PRUNE_DEDUP_SPLIT_PAD = int(os.getenv("DESKTOCR_PRUNE_DEDUP_SPLIT_PAD", "4"))
 _PRUNE_SINGLE_SPAN_MODE = os.getenv("DESKTOCR_SINGLE_SPAN_MODE", "1") == "1"
 _PRUNE_DEDUP_SPLIT_FLAG = "__split_segment__"
 _PRUNE_SINGLE_SPAN_FLAG = "__single_span__"
+_PRUNE_MAX_FILTERED_BOXES = int(os.getenv("DESKTOCR_MAX_FILTERED_BOXES", "16"))
+_FILTER_DUP_X_TOL = int(os.getenv("DESKTOCR_FILTER_DUP_X_TOL", "2"))
+_FILTER_DUP_H_TOL = int(os.getenv("DESKTOCR_FILTER_DUP_H_TOL", "2"))
+_FILTER_RECENT_CACHE = max(1, int(os.getenv("DESKTOCR_FILTER_RECENT_CACHE", "32")))
+_VN_SPAN_TIER_A_MIN = float(os.getenv("DESKTOCR_VN_SPAN_TIER_A_MIN", "0.20"))
+_VN_SPAN_TIER_B_MIN = float(os.getenv("DESKTOCR_VN_SPAN_TIER_B_MIN", "0.50"))
+_VN_SPAN_TIER_A_TARGET = float(os.getenv("DESKTOCR_VN_SPAN_TIER_A_TARGET", "0.49"))
 
 _TRIM_PAD_ENABLED = os.getenv("DESKTOCR_TRIM_PAD_ENABLE", "1") == "1"
 _TRIM_PAD_BOOST_ENABLED = os.getenv("DESKTOCR_TRIM_PAD_BOOST_ENABLE", "1") == "1"
@@ -168,8 +176,8 @@ class EasyOCREngine:
         self._reader = None
 
 class EngineManager:
-    def _dbg(self, msg):
-        logger.debug(msg)
+    def _dbg(self, msg, *args, **kwargs):
+        logger.debug(msg, *args, **kwargs)
 
     def __init__(self, models_dir: str, model_config: dict):
         self.models_dir = models_dir
@@ -578,6 +586,10 @@ class EngineManager:
         min_area = max(_DET_MIN_AREA_ABS, int(w * h * _DET_MIN_AREA_PCT))
 
         kept: list[list[int]] = []
+        kept_scores: list[tuple[float, int]] = []
+        recent = deque(maxlen=_FILTER_RECENT_CACHE)
+        dedup_hits = 0
+        dedup_log_budget = 5
         for b in boxes:
             norm = self._normalize_box(b[:4], w, h)
             if norm is None:
@@ -605,21 +617,64 @@ class EngineManager:
                 )
                 continue
 
+            dup_hit = False
+            for rx1, ry1, rx2, ry2 in recent:
+                if (
+                    abs(rx1 - x1) <= _FILTER_DUP_X_TOL
+                    and abs(rx2 - x2) <= _FILTER_DUP_X_TOL
+                    and abs((ry2 - ry1) - (y2 - y1)) <= _FILTER_DUP_H_TOL
+                ):
+                    dup_hit = True
+                    break
+
+            if dup_hit:
+                dedup_hits += 1
+                if dedup_hits <= dedup_log_budget:
+                    self._dbg(
+                        "[FilterDedup] suppressed near-duplicate box [%.0f,%.0f,%.0f,%.0f] (hits=%d)",
+                        x1,
+                        y1,
+                        x2,
+                        y2,
+                        dedup_hits,
+                    )
+                continue
+
             kept_box = [x1, y1, x2, y2]
             if len(b) > 4:
                 kept_box.extend(b[4:])
             kept.append(kept_box)
+            score = float(b[4]) if len(b) > 4 else 0.0
+            kept_scores.append((score, len(kept_scores)))
+            recent.append((x1, y1, x2, y2))
             logger.debug(
                 "[BoxFilter] KEPT box [%.0f,%.0f,%.0f,%.0f] w=%.0f h=%.0f area=%.0f aspect=%.2f",
                 x1, y1, x2, y2, bw, bh, area, aspect,
             )
 
+        if _PRUNE_MAX_FILTERED_BOXES > 0 and len(kept) > _PRUNE_MAX_FILTERED_BOXES:
+            sorted_idx = sorted(
+                range(len(kept_scores)),
+                key=lambda idx: kept_scores[idx][0],
+                reverse=True,
+            )
+            selected_idx = sorted(sorted_idx[:_PRUNE_MAX_FILTERED_BOXES])
+            dropped = len(kept) - len(selected_idx)
+            kept = [kept[idx] for idx in selected_idx]
+            self._dbg(
+                "[FilterCap] trimmed %d boxes (limit=%d, selected_scores=%s)",
+                dropped,
+                _PRUNE_MAX_FILTERED_BOXES,
+                [f"{kept_scores[idx][0]:.3f}" for idx in selected_idx[:4]],
+            )
+
         logger.info(
-            "[BoxFilter] %d/%d boxes kept after filtering (image %dx%d)",
+            "[BoxFilter] %d/%d boxes kept after filtering (image %dx%d, dup_hits=%d)",
             len(kept),
             total,
             w,
             h,
+            dedup_hits,
         )
 
         self._dbg(f"[Filter] Kept boxes: {kept}")
@@ -943,9 +998,29 @@ class EngineManager:
         span_right = max(b[2] for b in boxes)
         span_bottom = max(b[3] for b in boxes)
 
-        span_left = max(0, int(span_left))
+        horizontal_tier = "raw"
+        frame_w_safe = max(1, int(frame_w))
+        union_width = max(0, span_right - span_left)
+        union_ratio = float(union_width) / float(frame_w_safe)
+
+        target_x1 = span_left
+        target_x2 = span_right
+
+        target_ratio = min(1.0, max(_VN_SPAN_TIER_A_MIN, _VN_SPAN_TIER_A_TARGET))
+        if union_ratio >= _VN_SPAN_TIER_B_MIN:
+            target_x1 = 0
+            target_x2 = frame_w_safe
+            horizontal_tier = "tier_b_full"
+        elif union_ratio >= _VN_SPAN_TIER_A_MIN:
+            target_x1 = 0
+            target_x2 = max(1, int(round(target_ratio * frame_w_safe)))
+            horizontal_tier = "tier_a_wide"
+        elif union_ratio < _VN_SPAN_TIER_A_MIN:
+            horizontal_tier = "tier_c_raw"
+
+        span_left = max(0, int(target_x1))
         span_top = max(0, int(span_top))
-        span_right = min(frame_w, int(span_right))
+        span_right = min(frame_w_safe, int(target_x2))
         span_bottom = min(frame_h, int(span_bottom))
 
         best_box = max(
@@ -959,12 +1034,15 @@ class EngineManager:
         collapsed = [span_left, span_top, span_right, span_bottom, *extras]
         self._set_box_flag(collapsed, _PRUNE_SINGLE_SPAN_FLAG)
         self._dbg(
-            f"[SingleSpan] collapsed {len(boxes)} boxes -> span {[span_left, span_top, span_right, span_bottom]}"
+            f"[SingleSpan] collapsed {len(boxes)} boxes -> span {[span_left, span_top, span_right, span_bottom]} "
+            f"union_ratio={union_ratio:.3f} tier={horizontal_tier}"
         )
         meta = {
             "single_span": True,
             "span_before": len(boxes),
             "span_box": [span_left, span_top, span_right, span_bottom],
+            "span_union_ratio": union_ratio,
+            "span_horizontal_tier": horizontal_tier,
         }
         return [collapsed], meta
 

@@ -39,7 +39,15 @@ logger = logging.getLogger(__name__)
 
 
 DET_THRESHOLD_BASE = max(0.10, float(os.getenv("DESKTOCR_DET_THRESHOLD", "0.15")))
-DET_BOX_THRESHOLD = max(0.25, float(os.getenv("DESKTOCR_DET_BOX_THRESHOLD", "0.30")))
+_VN_SCORE_THRESH = os.getenv("DESKTOCR_DET_SCORE_THRESH_VN")
+DET_BOX_THRESHOLD = max(
+    0.25,
+    float(
+        _VN_SCORE_THRESH
+        if _VN_SCORE_THRESH is not None
+        else os.getenv("DESKTOCR_DET_BOX_THRESHOLD", "0.50")
+    ),
+)
 DET_UNCLIP_RATIO = min(3.0, max(1.0, float(os.getenv("DESKTOCR_DET_UNCLIP_RATIO", "2.5"))))
 DET_SCORE_MODE = os.getenv("DESKTOCR_DET_SCORE_MODE", "slow").strip().lower()
 DET_MIN_BOX_AREA = 40 * 40
@@ -126,7 +134,11 @@ class PaddleOCR:
 
                 det_path = str(self.models_dir / self.model_config["det"])
 
-                logger.info(f"Initializing detection session with {det_path}...")
+                logger.info(
+                    "Initializing detection session with %s (score_thresh=%.2f)...",
+                    det_path,
+                    DET_BOX_THRESHOLD,
+                )
 
                 self.det_session = await loop.run_in_executor(
 
