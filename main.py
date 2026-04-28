@@ -286,7 +286,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
   
     
     settings_state = load_settings()
-    saved_line_count = max(1, min(5, int(settings_state.get("paddle_line_count", 3) or 1)))
+    saved_line_count = max(1, min(5, int(settings_state.get("paddle_line_count", 3) or 3)))
     google_vision: GoogleVisionOCR | None = None
 
     def _set_status_message(status_text: str, summary_text: str) -> None:
@@ -336,7 +336,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         try:
             normalized = int(value)
         except (TypeError, ValueError):
-            normalized = 1
+            normalized = 3
         normalized = max(1, min(5, normalized))
         pipeline.set_line_count(normalized)
         if normalized == saved_line_count:
@@ -350,7 +350,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             try:
                 return int(window.get_active_line_count())
             except Exception:  # noqa: BLE001
-                return 1
+                return saved_line_count
         return saved_line_count
 
     try:
@@ -445,7 +445,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     logger.info("Debug detect overlay skipped (selected engine does not expose Paddle detect boxes).")
 
                 ocr_t0 = time.perf_counter()
-                raw = await engine_manager.run_ocr(frame)
+                raw = await engine_manager.run_ocr(frame, line_count=_selected_line_count())
                 ocr_ms = (time.perf_counter() - ocr_t0) * 1000.0
                 raw_text = raw.get("text", "")
                 raw_conf = raw.get("confidence", 0.0)

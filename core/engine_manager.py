@@ -342,7 +342,7 @@ class EngineManager:
         
         return await task
 
-    async def run_ocr(self, image: np.ndarray, line_count: int = 1) -> dict:
+    async def run_ocr(self, image: np.ndarray, line_count: int = 3) -> dict:
         if not self._current_instance:
             logger.error("No active engine to run OCR.")
             return self._normalize_result("", 0.0, {"warning": "no_active_engine"})
@@ -354,7 +354,7 @@ class EngineManager:
 
         try:
             if self._current_id == "paddle":
-                line_count = max(1, int(line_count or 1))
+                line_count = max(1, int(line_count or 3))
                 bands = self._slice_into_bands(image, line_count)
                 if not bands:
                     return self._normalize_result("", 0.0, {"warning": "empty_frame"})
@@ -571,7 +571,7 @@ class EngineManager:
     def _slice_into_bands(self, image: np.ndarray, line_count: int) -> list[tuple[np.ndarray, int, int]]:
         if image is None or image.size == 0:
             return []
-        line_count = max(1, int(line_count or 1))
+        line_count = max(1, int(line_count or 3))
         h_total = image.shape[0]
         if h_total <= 0:
             return []

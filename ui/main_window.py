@@ -50,12 +50,13 @@ class MainWindow(QMainWindow):
         # Frame queue for preview widget
         self._frame_queue = deque(maxlen=1)
         self._active_engine_id = "paddle"
-        self._paddle_line_count = 1
+        self._paddle_line_count = 3
 
         # Controls bar (top)
         paddle_variants = [f"paddle-{i}" for i in range(1, 6)]
         engine_options = paddle_variants + ["windows_ocr"]
         self.controls_bar = ControlsBar(engine_options)
+        self.controls_bar.set_engine(f"paddle-{self._paddle_line_count}")
         self._top_container = QWidget()
         top_layout = QHBoxLayout(self._top_container)
         top_layout.setContentsMargins(0, 0, 0, 0)
@@ -331,7 +332,7 @@ class MainWindow(QMainWindow):
 
     def get_active_line_count(self) -> int:
         if self._active_engine_id == "paddle":
-            return max(1, int(self._paddle_line_count or 1))
+            return max(1, int(self._paddle_line_count or 3))
         return 1
 
     def set_active_engine(self, engine_id: str, line_count: int | None = None) -> None:
@@ -366,16 +367,16 @@ class MainWindow(QMainWindow):
 
     def _parse_engine_choice(self, selection: str) -> tuple[str, int]:
         if not selection:
-            return "paddle", 1
+            return "paddle", 3
         selection = selection.strip().lower()
         if selection.startswith("paddle"):
             parts = selection.split("-", 1)
-            line_count = 1
+            line_count = 3
             if len(parts) == 2:
                 try:
                     line_count = int(parts[1])
                 except ValueError:
-                    line_count = 1
+                    line_count = 3
             return "paddle", max(1, min(5, line_count))
         return selection, 1
 

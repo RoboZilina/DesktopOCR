@@ -24,6 +24,22 @@ FONT_SIZES = {
 }
 
 
+def _blend_hex(base: str, target: str, ratio: float) -> str:
+    """Linearly blend two hex colors."""
+    def _to_rgb(value: str) -> tuple[int, int, int]:
+        value = value.lstrip("#")
+        if len(value) == 3:
+            value = "".join(ch * 2 for ch in value)
+        return tuple(int(value[i:i+2], 16) for i in range(0, 6, 2))
+
+    br, bg, bb = _to_rgb(base or "#000000")
+    tr, tg, tb = _to_rgb(target or "#000000")
+    rr = round(br + (tr - br) * ratio)
+    rg = round(bg + (tg - bg) * ratio)
+    rb = round(bb + (tb - bb) * ratio)
+    return f"#{rr:02x}{rg:02x}{rb:02x}"
+
+
 class TranscriptionTray(QWidget):
     recapture_requested = pyqtSignal()
     tts_requested       = pyqtSignal(str)   # text to speak
@@ -33,6 +49,7 @@ class TranscriptionTray(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setStyleSheet("background: transparent; border-top: 1px solid transparent;")
+        self._primary_buttons: list[QPushButton] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
@@ -49,18 +66,17 @@ class TranscriptionTray(QWidget):
         self._recapture_btn = QPushButton("Re-capture")
         self._recapture_btn.setFixedHeight(28)
         self._recapture_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self._recapture_btn.setStyleSheet(
-            "background: #10b981; color: #000000; border: none; "
-            "border-radius: 6px; padding: 4px 14px; font-weight: 700; font-size: 12px;"
-        )
         self._recapture_btn.clicked.connect(lambda: self.recapture_requested.emit())
+        self._primary_buttons.append(self._recapture_btn)
         ocr_header.addWidget(self._recapture_btn)
         layout.addLayout(ocr_header)
 
         self._ocr_text = QTextEdit()
         self._ocr_text.setReadOnly(False)  # user can select text
         self._ocr_text.setStyleSheet(self._text_style(large=True))
-        self._ocr_text.setPlaceholderText("OCR output will appear here...")
+        self._ocr_text.setPlaceholderText(
+            "Captured OCR text appears here. Keep the selection tight around actual text lines."
+        )
         # Wire selection change → populate selection box
         self._ocr_text.selectionChanged.connect(self._on_selection_changed)
         self._ocr_scroll = QScrollArea()
@@ -83,27 +99,21 @@ class TranscriptionTray(QWidget):
         self._speak_btn = QPushButton("Speak")
         self._speak_btn.setFixedHeight(28)
         self._speak_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self._speak_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._speak_btn.setStyleSheet(
-            "background: #1a1a1f; color: #10b981; border: 1px solid #2a2a2f; "
-            "border-radius: 6px; padding: 4px 14px; font-size: 12px; font-weight: 600;"
-        )
+        self._speak_btn.setCursor(Qt.CursorShape.ArrowCursor)
         self._speak_btn.clicked.connect(
             lambda: self.tts_requested.emit(
                 self._sel_text.toPlainText() or self._ocr_text.toPlainText()
             )
         )
+        self._primary_buttons.append(self._speak_btn)
         sel_header.addWidget(self._speak_btn)
         self._translate_btn = QPushButton("Translate")
         self._translate_btn.setFixedHeight(28)
         self._translate_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self._translate_btn.setStyleSheet(
-            "background: #10b981; color: #000000; border: none; "
-            "border-radius: 6px; padding: 4px 14px; font-weight: 700; font-size: 12px;"
-        )
         self._translate_btn.clicked.connect(
             lambda: self.translate_requested.emit(self._sel_text.toPlainText())
         )
+        self._primary_buttons.append(self._translate_btn)
         sel_header.addWidget(self._translate_btn)
         layout.addLayout(sel_header)
 
@@ -111,7 +121,7 @@ class TranscriptionTray(QWidget):
         self._sel_text.setReadOnly(True)
         self._sel_text.setStyleSheet(self._text_style())
         self._sel_text.setPlaceholderText(
-            "Highlight text above to translate selection..."
+            "Highlight text in the OCR pane and it will copy here automatically."
         )
         self._sel_scroll = QScrollArea()
         self._sel_scroll.setWidgetResizable(True)
@@ -130,13 +140,16 @@ class TranscriptionTray(QWidget):
         self._trans_text = QTextEdit()
         self._trans_text.setReadOnly(True)
         self._trans_text.setStyleSheet(self._text_style())
-        self._trans_text.setPlaceholderText("Translation will appear here...")
+        self._trans_text.setPlaceholderText("Click Translate to see the selection rendered in English.")
         self._trans_scroll = QScrollArea()
         self._trans_scroll.setWidgetResizable(True)
         self._trans_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._trans_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._trans_scroll.setWidget(self._trans_text)
         layout.addWidget(self._trans_scroll)
+
+        # Apply base styling for primary buttons
+        self._apply_primary_button_styles()
 
         self.set_text_size("medium")
         self.set_tray_height("medium")
@@ -203,19 +216,7 @@ class TranscriptionTray(QWidget):
         if hasattr(self, '_current_font_size'):
             self.set_text_size(self._current_font_size)
         # Re-apply buttons
-        self._recapture_btn.setStyleSheet(
-            f"background: {pal.accent}; color: {pal.bg if pal.is_dark else '#ffffff'}; border: none; "
-            "border-radius: 6px; padding: 4px 14px; font-weight: 700; font-size: 12px;"
-        )
-        self._translate_btn.setStyleSheet(
-            f"background: {pal.accent}; color: {pal.bg if pal.is_dark else '#ffffff'}; border: none; "
-            "border-radius: 6px; padding: 4px 14px; font-weight: 700; font-size: 12px;"
-        )
-        icon_bg = "#1a1a1f" if pal.is_dark else "#e2e8f0"
-        self._speak_btn.setStyleSheet(
-            f"background: {icon_bg}; color: {pal.accent}; border: 1px solid {pal.border}; "
-            "border-radius: 6px; padding: 4px 14px; font-size: 12px; font-weight: 600;"
-        )
+        self._apply_primary_button_styles()
 
     def set_ocr_text(self, text: str):
         self._ocr_text.setPlainText(text)
@@ -264,6 +265,27 @@ class TranscriptionTray(QWidget):
         lbl.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         lbl.setStyleSheet("background: transparent; border: none;")
         return lbl
+
+    def _apply_primary_button_styles(self) -> None:
+        pal = getattr(self, '_pal', None)
+        accent = pal.accent if pal else "#10b981"
+        text_color = pal.bg if pal and pal.is_dark else "#ffffff"
+        hover = _blend_hex(accent, "#ffffff", 0.15)
+        pressed = _blend_hex(accent, "#000000", 0.18)
+        style = (
+            f"QPushButton {{"
+            f" background: {accent};"
+            f" color: {text_color};"
+            " border: none; border-radius: 6px; padding: 4px 14px;"
+            " font-weight: 700; font-size: 12px;"
+            " margin-top: 0px; margin-bottom: 0px;"
+            "}"
+            f"QPushButton:hover {{ background: {hover}; margin-top: -1px; margin-bottom: 1px; }}"
+            f"QPushButton:pressed {{ background: {pressed}; margin-top: 0px; margin-bottom: 0px; }}"
+            "QPushButton:disabled { opacity: 0.6; margin-top: 0px; margin-bottom: 0px; }"
+        )
+        for btn in getattr(self, '_primary_buttons', []):
+            btn.setStyleSheet(style)
 
     def get_ocr_text(self) -> str:
         return self._ocr_text.toPlainText()
