@@ -16,6 +16,7 @@ class SideMenu(QWidget):
     auto_read_selection_changed = pyqtSignal(bool)
     history_visible_changed  = pyqtSignal(bool)
     preview_visible_changed  = pyqtSignal(bool)
+    ocr_canvas_visible_changed = pyqtSignal(bool)
     vn_cleaner_changed       = pyqtSignal(bool)
     diff_threshold_changed   = pyqtSignal(float)
     text_size_changed        = pyqtSignal(str)
@@ -35,6 +36,7 @@ class SideMenu(QWidget):
     google_vision_api_key_changed = pyqtSignal(str)
     reset_requested          = pyqtSignal()
     hide_requested           = pyqtSignal()
+    user_guide_requested     = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -47,6 +49,8 @@ class SideMenu(QWidget):
         self._openai_toggle: tuple[QPushButton, QPushButton] | None = None
         self._deepseek_toggle: tuple[QPushButton, QPushButton] | None = None
         self._google_vision_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._capture_preview_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._ocr_canvas_toggle: tuple[QPushButton, QPushButton] | None = None
 
         # Outer layout: just holds the scroll area
         outer = QVBoxLayout(self)
@@ -76,9 +80,6 @@ class SideMenu(QWidget):
         self._header.setCursor(Qt.CursorShape.PointingHandCursor)
         self._header.installEventFilter(self)
         layout.addWidget(self._header)
-        layout.addWidget(self._divider())
-
-        # Theme toggle
         layout.addWidget(self._create_section_header("Theme"))
         theme_row = QHBoxLayout()
         self._theme_btns = {}
@@ -90,12 +91,10 @@ class SideMenu(QWidget):
             btn.setMinimumWidth(0)
             btn.setMaximumWidth(16777215)
             btn.clicked.connect(lambda _checked, t=tid: self._on_theme_clicked(t))
-            theme_row.addWidget(btn)
+            theme_row.addWidget(btn, 1)
             self._theme_btns[tid] = btn
         self._theme_btns["auto"].setChecked(True)
-        theme_row.addStretch()
         layout.addLayout(theme_row)
-        layout.addWidget(self._divider())
 
         # Toggle sections
         self._add_toggle_section(layout, "Auto-Capture",
@@ -110,26 +109,61 @@ class SideMenu(QWidget):
         )
         self._add_toggle_section(layout, "History Panel",
                                  self.history_visible_changed, default=True)
-        self._add_toggle_section(layout, "Capture Preview",
-                                 self.preview_visible_changed, default=True)
         self._add_toggle_section(layout, "VN Text Cleaner",
                                  self.vn_cleaner_changed, default=True)
 
+        # Text size preset (font)
+        layout.addSpacing(6)
+        layout.addWidget(self._create_section_header("Text Size"))
+        size_row = QHBoxLayout()
+        self._size_btns = {}
+        for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
+            btn = QPushButton(label)
+            btn.setProperty("menuClass", "option-btn")
+            btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setMinimumWidth(0)
+            btn.setMaximumWidth(16777215)
+            btn.clicked.connect(lambda _checked, s=sid: self._on_text_size_clicked(s))
+            size_row.addWidget(btn, 1)
+            self._size_btns[sid] = btn
+        self._size_btns["medium"].setChecked(True)
+        layout.addLayout(size_row)
+
+        # Text area size preset (tray height)
+        layout.addWidget(self._create_section_header("Text Area Size"))
+        tray_row = QHBoxLayout()
+        self._tray_size_btns = {}
+        for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
+            btn = QPushButton(label)
+            btn.setProperty("menuClass", "option-btn")
+            btn.setCheckable(True)
+            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            btn.setMinimumWidth(0)
+            btn.setMaximumWidth(16777215)
+            btn.clicked.connect(lambda _checked, s=sid: self._on_tray_height_clicked(s))
+            tray_row.addWidget(btn, 1)
+            self._tray_size_btns[sid] = btn
+        self._tray_size_btns["medium"].setChecked(True)
+        layout.addLayout(tray_row)
+
         # --- Translation section ---
-        layout.addWidget(self._divider())
-        layout.addWidget(self._create_section_header("Translation"))
+        self._translation_toggle_btn, translation_layout = self._create_collapsible_group(
+            "Translation Options", layout, default_open=True
+        )
+        translation_layout.addWidget(self._create_section_header("Translation"))
         self._add_toggle_section(
-            layout, "Enable Translation",
+            translation_layout, "Enable Translation",
             self.translation_enabled_changed, default=True
         )
         self._auto_translate_toggle = self._add_toggle_section(
-            layout,
+            translation_layout,
             "Auto-translate Selection",
             self.auto_translate_selection_changed,
             default=False,
         )
 
-        layout.addWidget(self._create_section_header("Backend"))
+        translation_layout.addWidget(self._create_section_header("Backend"))
         backend_row = QHBoxLayout()
         self._backend_btns: dict[str, QPushButton] = {}
         for label, bid in [("Auto", "auto"), ("DeepL", "deepl"), ("Google", "google")]:
@@ -142,27 +176,30 @@ class SideMenu(QWidget):
             btn.clicked.connect(
                 lambda _checked, b=bid: self._on_translation_backend_clicked(b)
             )
-            backend_row.addWidget(btn)
+            backend_row.addWidget(btn, 1)
             self._backend_btns[bid] = btn
         self._backend_btns["auto"].setChecked(True)
-        backend_row.addStretch()
-        layout.addLayout(backend_row)
+        translation_layout.addLayout(backend_row)
 
         self._libre_url_label = self._create_section_header("LibreTranslate URL")
         self._libre_url_label.hide()
-        layout.addWidget(self._libre_url_label)
+        translation_layout.addWidget(self._libre_url_label)
         self._libre_url_edit = QLineEdit("http://localhost:5000")
         self._libre_url_edit.hide()
         self._libre_url_edit.setPlaceholderText("http://localhost:5000")
         self._libre_url_edit.editingFinished.connect(
             lambda: self.libre_url_changed.emit(self._libre_url_edit.text().strip())
         )
-        layout.addWidget(self._libre_url_edit)
+        translation_layout.addWidget(self._libre_url_edit)
 
-        # AI Validator
-        layout.addWidget(self._divider())
+        # AI Enhancements
+        self._ai_toggle_btn, ai_layout = self._create_collapsible_group(
+            "AI Enhancements", layout, default_open=False
+        )
+
+        ai_layout.addWidget(self._create_section_header("OpenAI Validator"))
         self._openai_toggle = self._add_toggle_section(
-            layout, "AI Validator",
+            ai_layout, "OpenAI Validator",
             self.openai_validator_enabled_changed,
             default=False
         )
@@ -193,13 +230,11 @@ class SideMenu(QWidget):
 
         self._openai_details.setVisible(False)
         self.openai_validator_enabled_changed.connect(self._openai_details.setVisible)
-        layout.addWidget(self._openai_details)
+        ai_layout.addWidget(self._openai_details)
 
-        # DeepSeek Validator (Budget Mode)
-        layout.addWidget(self._divider())
-        layout.addWidget(self._create_section_header("DeepSeek Validator (Budget Mode)"))
+        ai_layout.addWidget(self._create_section_header("DeepSeek Validator (Budget Mode)"))
         self._deepseek_toggle = self._add_toggle_section(
-            layout,
+            ai_layout,
             "Enable DeepSeek",
             self.deepseek_validator_enabled_changed,
             default=False,
@@ -237,13 +272,11 @@ class SideMenu(QWidget):
 
         self._deepseek_details.setVisible(False)
         self.deepseek_validator_enabled_changed.connect(self._deepseek_details.setVisible)
-        layout.addWidget(self._deepseek_details)
+        ai_layout.addWidget(self._deepseek_details)
 
-        # Cloud OCR (Google Vision)
-        layout.addWidget(self._divider())
-        layout.addWidget(self._create_section_header("Cloud OCR (Google Vision)"))
+        ai_layout.addWidget(self._create_section_header("Cloud OCR (Google Vision)"))
         self._google_vision_toggle = self._add_toggle_section(
-            layout,
+            ai_layout,
             "Enable Cloud OCR",
             self.google_vision_enabled_changed,
             default=False,
@@ -273,47 +306,9 @@ class SideMenu(QWidget):
 
         self._google_vision_details.setVisible(False)
         self.google_vision_enabled_changed.connect(self._google_vision_details.setVisible)
-        layout.addWidget(self._google_vision_details)
-
-        # Text size preset (font)
-        layout.addWidget(self._divider())
-        layout.addWidget(self._create_section_header("Text Size"))
-        size_row = QHBoxLayout()
-        self._size_btns = {}
-        for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
-            btn = QPushButton(label)
-            btn.setProperty("menuClass", "option-btn")
-            btn.setCheckable(True)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setMinimumWidth(0)
-            btn.setMaximumWidth(16777215)
-            btn.clicked.connect(lambda _checked, s=sid: self._on_text_size_clicked(s))
-            size_row.addWidget(btn)
-            self._size_btns[sid] = btn
-        self._size_btns["medium"].setChecked(True)
-        size_row.addStretch()
-        layout.addLayout(size_row)
-
-        # Text area size preset (tray height)
-        layout.addWidget(self._create_section_header("Text Area Size"))
-        tray_row = QHBoxLayout()
-        self._tray_size_btns = {}
-        for label, sid in [("S", "small"), ("M", "medium"), ("L", "large")]:
-            btn = QPushButton(label)
-            btn.setProperty("menuClass", "option-btn")
-            btn.setCheckable(True)
-            btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            btn.setMinimumWidth(0)
-            btn.setMaximumWidth(16777215)
-            btn.clicked.connect(lambda _checked, s=sid: self._on_tray_height_clicked(s))
-            tray_row.addWidget(btn)
-            self._tray_size_btns[sid] = btn
-        self._tray_size_btns["medium"].setChecked(True)
-        tray_row.addStretch()
-        layout.addLayout(tray_row)
+        ai_layout.addWidget(self._google_vision_details)
 
         # Advanced settings toggle (collapsible)
-        layout.addWidget(self._divider())
         self._advanced_toggle_btn = QPushButton("Advanced Settings")
         self._advanced_toggle_btn.setProperty("menuClass", "option-btn")
         self._advanced_toggle_btn.setCheckable(True)
@@ -342,6 +337,18 @@ class SideMenu(QWidget):
         threshold_row.addWidget(self._threshold_slider)
         threshold_row.addWidget(self._threshold_label)
         adv_panel_layout.addLayout(threshold_row)
+        self._capture_preview_toggle = self._add_toggle_section(
+            adv_panel_layout,
+            "Capture Preview",
+            self.preview_visible_changed,
+            default=True,
+        )
+        self._ocr_canvas_toggle = self._add_toggle_section(
+            adv_panel_layout,
+            "OCR Canvas (Debug)",
+            self.ocr_canvas_visible_changed,
+            default=False,
+        )
         layout.addWidget(self._advanced_panel)
         self._advanced_panel.setVisible(False)
 
@@ -351,7 +358,14 @@ class SideMenu(QWidget):
         self._set_advanced_visible(False)
 
         # Action buttons
-        layout.addWidget(self._divider())
+        self._user_guide_btn = QPushButton("User Guide")
+        self._user_guide_btn.setProperty("menuClass", "option-btn")
+        self._user_guide_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._user_guide_btn.setMinimumWidth(0)
+        self._user_guide_btn.setMaximumWidth(16777215)
+        self._user_guide_btn.clicked.connect(self.user_guide_requested.emit)
+        layout.addWidget(self._user_guide_btn)
+
         self._reset_btn = QPushButton("Reset to Defaults")
         self._reset_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._reset_btn.setMinimumWidth(0)
@@ -409,9 +423,11 @@ class SideMenu(QWidget):
                 color: {text};
                 border: 1px solid {btn_border};
                 border-radius: 8px;
-                padding: 6px 12px;
+                padding: 4px 6px;
+                min-height: 28px;
                 font-size: 13px;
                 font-weight: 600;
+                width: 50%;
             }}
             #SideMenu QPushButton[menuClass="option-btn"]:checked {{
                 background: {accent};
@@ -428,7 +444,8 @@ class SideMenu(QWidget):
                 color: {text};
                 border: 1px solid {btn_border};
                 border-radius: 8px;
-                padding: 6px 12px;
+                padding: 4px 6px;
+                min-height: 28px;
                 font-size: 13px;
             }}
             #SideMenu QPushButton:not([menuClass]):hover {{
@@ -514,6 +531,32 @@ class SideMenu(QWidget):
         header.setStyleSheet("background: transparent; border: none;")
         return header
 
+    def _create_collapsible_group(
+        self,
+        title: str,
+        parent_layout: QVBoxLayout,
+        *,
+        default_open: bool = False,
+    ) -> tuple[QPushButton, QVBoxLayout]:
+        btn = QPushButton(title)
+        btn.setProperty("menuClass", "option-btn")
+        btn.setCheckable(True)
+        btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        btn.setMinimumWidth(0)
+        btn.setMaximumWidth(16777215)
+        parent_layout.addWidget(btn)
+
+        panel = QWidget()
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 4, 0, 0)
+        panel_layout.setSpacing(6)
+        parent_layout.addWidget(panel)
+
+        panel.setVisible(default_open)
+        btn.setChecked(default_open)
+        btn.clicked.connect(lambda checked, target=panel: target.setVisible(checked))
+        return btn, panel_layout
+
     def _on_theme_clicked(self, theme_id: str):
         for tid, btn in self._theme_btns.items():
             btn.setChecked(tid == theme_id)
@@ -552,7 +595,9 @@ class SideMenu(QWidget):
         self.theme_changed.emit("auto")
         self.set_auto_read_selection(False)
         self.set_auto_translate_selection(False)
+        self.set_preview_visible(True, emit_signal=True)
         self._set_advanced_visible(False)
+        self.set_ocr_canvas_visible(False, emit_signal=True)
         self.reset_requested.emit()
 
     def _add_toggle_section(self, layout, title: str,
@@ -590,9 +635,8 @@ class SideMenu(QWidget):
 
         on_btn.clicked.connect(_on_clicked)
         off_btn.clicked.connect(_off_clicked)
-        row.addWidget(on_btn)
-        row.addWidget(off_btn)
-        row.addStretch()
+        row.addWidget(on_btn, 1)
+        row.addWidget(off_btn, 1)
         layout.addLayout(row)
         return on_btn, off_btn
 
@@ -673,6 +717,16 @@ class SideMenu(QWidget):
     def set_google_vision_api_key(self, key: str) -> None:
         if hasattr(self, "_google_vision_key_edit"):
             self._google_vision_key_edit.setText(key or "")
+
+    def set_ocr_canvas_visible(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._ocr_canvas_toggle, enabled)
+        if emit_signal:
+            self.ocr_canvas_visible_changed.emit(enabled)
+
+    def set_preview_visible(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._capture_preview_toggle, enabled)
+        if emit_signal:
+            self.preview_visible_changed.emit(enabled)
 
     def _set_advanced_visible(self, visible: bool) -> None:
         if not hasattr(self, "_advanced_panel"):

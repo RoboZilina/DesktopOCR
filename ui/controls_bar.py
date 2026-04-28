@@ -1,7 +1,7 @@
 """Header controls bar — mirrors web app's top nav bar."""
 
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton, QSizePolicy
-from PyQt6.QtCore import pyqtSignal, Qt, QSize
+from PyQt6.QtCore import pyqtSignal, Qt
 from ui.theme import ThemePalette, DARK
 
 
@@ -44,10 +44,13 @@ class ControlsBar(QWidget):
         layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         # Brand / Menu
-        self._menu_btn = QPushButton("☰")
-        self._menu_btn.setObjectName("hamburger_button")
-        self._style_button(self._menu_btn)
-        self._menu_btn.clicked.connect(self.menu_requested)
+        self._menu_btn = QPushButton("Menu ▾")
+        self._menu_btn.setObjectName("MenuButton")
+        self._menu_btn.setCheckable(True)
+        self._menu_btn.setFixedHeight(34)
+        self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._menu_btn.toggled.connect(self._on_menu_toggled)
+        self._menu_open = False
         layout.addWidget(self._menu_btn)
 
         brand = QLabel("Personal OCR")
@@ -67,9 +70,11 @@ class ControlsBar(QWidget):
         self._engine_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold; background: transparent; border: none;")
         layout.addWidget(self._engine_lbl)
         self._engine_combo = QComboBox()
-        self._engine_combo.addItems(engines)
+        for engine in engines:
+            label = self._format_engine_label(engine)
+            self._engine_combo.addItem(label, engine)
         self._engine_combo.setStyleSheet(_combo_style(DARK))
-        self._engine_combo.currentTextChanged.connect(self.engine_changed.emit)
+        self._engine_combo.currentIndexChanged.connect(self._emit_engine_change)
         layout.addWidget(self._engine_combo)
 
         layout.addSpacing(6)
@@ -130,7 +135,7 @@ class ControlsBar(QWidget):
     def set_engine(self, engine_id: str):
         """Set combo without firing signal."""
         self._engine_combo.blockSignals(True)
-        idx = self._engine_combo.findText(engine_id)
+        idx = self._engine_combo.findData(engine_id)
         if idx >= 0:
             self._engine_combo.setCurrentIndex(idx)
         self._engine_combo.blockSignals(False)
@@ -151,6 +156,11 @@ class ControlsBar(QWidget):
         if hasattr(self, "_voice_id_map") and text in self._voice_id_map:
             self.voice_changed.emit(self._voice_id_map[text])
 
+    def _emit_engine_change(self, index: int):
+        data = self._engine_combo.itemData(index)
+        if data:
+            self.engine_changed.emit(data)
+
     def set_theme(self, pal: ThemePalette):
         self.setStyleSheet(
             f"background: {pal.panel}; border-bottom: 1px solid {pal.border};"
@@ -162,27 +172,34 @@ class ControlsBar(QWidget):
             brand.setStyleSheet(
                 f"color: {pal.text}; font-size: 14px; font-weight: 800; letter-spacing: 0.5px; background: transparent; border: none;"
             )
-        hover_bg = "rgba(255, 255, 255, 0.12)" if pal.is_dark else "rgba(0, 0, 0, 0.08)"
-        pressed_bg = "rgba(255, 255, 255, 0.2)" if pal.is_dark else "rgba(0, 0, 0, 0.14)"
+        hover_bg = "rgba(255, 255, 255, 0.08)" if pal.is_dark else "rgba(0, 0, 0, 0.06)"
+        pressed_bg = "rgba(255, 255, 255, 0.14)" if pal.is_dark else "rgba(0, 0, 0, 0.12)"
+        checked_bg = "rgba(255, 255, 255, 0.16)" if pal.is_dark else "rgba(0, 0, 0, 0.16)"
         self._menu_btn.setStyleSheet(
-            (
-                f"QPushButton#hamburger_button {{"
-                f" background: transparent;"
-                f" border: none;"
-                f" color: {pal.text};"
-                f" font-size: 14px;"
-                f" border-radius: 6px;"
-                f" padding: 4px;"
-                f" text-align: center;"
-                f"}}"
-                f"QPushButton#hamburger_button:hover {{"
-                f" background-color: {hover_bg};"
-                f"}}"
-                f"QPushButton#hamburger_button:pressed {{"
-                f" background-color: {pressed_bg};"
-                f"}}"
-            )
+            f"""
+            QPushButton#MenuButton {{
+                border: none;
+                background: transparent;
+                padding: 4px 10px;
+                color: {pal.text};
+                font-size: 13px;
+                font-weight: 500;
+                border-radius: 6px;
+            }}
+            QPushButton#MenuButton:hover {{
+                background: {hover_bg};
+            }}
+            QPushButton#MenuButton:pressed {{
+                background: {pressed_bg};
+                font-weight: 600;
+            }}
+            QPushButton#MenuButton:checked {{
+                background: {checked_bg};
+                font-weight: 600;
+            }}
+            """
         )
+        self._update_menu_label(self._menu_open)
         self._engine_lbl.setStyleSheet(
             f"color: {pal.text_secondary}; font-size: 11px; font-weight: bold; background: transparent; border: none;"
         )
@@ -192,13 +209,35 @@ class ControlsBar(QWidget):
         self.voice_selector.setStyleSheet(_combo_style(pal))
 
     def set_menu_icon(self, opened: bool):
-        self._menu_btn.setText("✕" if opened else "☰")
+        self._menu_open = opened
+        block = self._menu_btn.blockSignals(True)
+        self._menu_btn.setChecked(opened)
+        self._menu_btn.blockSignals(block)
+        self._update_menu_label(opened)
 
     def _style_button(self, btn: QPushButton):
         btn.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         btn.setMinimumHeight(28)
         btn.setMinimumWidth(32)
-        btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setProperty("role", "button")
-        btn.setIconSize(QSize(16, 16))
-        btn.setStyleSheet("text-align: center; padding: 4px 8px;")
+
+    def _update_menu_label(self, opened: bool) -> None:
+        self._menu_btn.setText("Menu ▴" if opened else "Menu ▾")
+
+    def _on_menu_toggled(self, checked: bool) -> None:
+        self._menu_open = checked
+        self._update_menu_label(checked)
+        self.menu_requested.emit()
+
+    def _format_engine_label(self, engine_id: str) -> str:
+        engine_id = engine_id or ""
+        if engine_id.startswith("paddle-"):
+            try:
+                line_count = int(engine_id.split("-", 1)[1])
+            except (ValueError, IndexError):
+                line_count = 1
+            line_word = "line" if line_count == 1 else "lines"
+            return f"Paddle — {line_count} {line_word}"
+        if engine_id == "windows_ocr":
+            return "Windows OCR"
+        return engine_id.replace("_", " ").title()
+

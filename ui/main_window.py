@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import pathlib
 from collections import deque
 import numpy as np
 
@@ -22,6 +23,7 @@ from ui.transcription_tray import TranscriptionTray
 from ui.history_sidebar import HistorySidebar
 from ui.side_menu import SideMenu
 from ui.components import StatusBar
+from ui.user_guide_dialog import UserGuideDialog
 from core.translation.manager import TranslationManager
 from core.translation.deepl_backend import DeepLBackend
 from core.translation.google_backend import GoogleTranslateBackend
@@ -52,7 +54,7 @@ class MainWindow(QMainWindow):
 
         # Controls bar (top)
         paddle_variants = [f"paddle-{i}" for i in range(1, 6)]
-        engine_options = paddle_variants + ["windows_ocr", "easyocr"]
+        engine_options = paddle_variants + ["windows_ocr"]
         self.controls_bar = ControlsBar(engine_options)
         self._top_container = QWidget()
         top_layout = QHBoxLayout(self._top_container)
@@ -79,6 +81,7 @@ class MainWindow(QMainWindow):
 
         self.preview_widget = PreviewWidget(self._frame_queue)
         self.ocr_canvas = OcrCanvasWidget()
+        self.ocr_canvas.setVisible(False)
         self.transcription_tray = TranscriptionTray()
         self.preview_widget.set_line_guides(self.get_active_line_count())
 
@@ -163,6 +166,12 @@ class MainWindow(QMainWindow):
         self.side_menu.auto_translate_selection_changed.connect(
             self._on_auto_translate_selection_changed
         )
+        self.side_menu.ocr_canvas_visible_changed.connect(
+            self._on_ocr_canvas_visible_changed
+        )
+        self.side_menu.user_guide_requested.connect(self._show_user_guide)
+
+        self._user_guide_path = pathlib.Path("docs/user_guide.html")
 
         # Detect and apply system theme on startup
         self._detect_and_apply_theme()
@@ -205,6 +214,13 @@ class MainWindow(QMainWindow):
         self.status_bar.set_theme(pal)
         self.preview_widget.set_theme(pal)
         self.ocr_canvas.set_theme(pal)
+
+    def _show_user_guide(self):
+        dialog = UserGuideDialog(self, guide_path=str(self._user_guide_path))
+        dialog.exec()
+
+    def _on_ocr_canvas_visible_changed(self, visible: bool) -> None:
+        self.ocr_canvas.setVisible(visible)
 
     # --- Side menu positioning ---
 
@@ -272,7 +288,9 @@ class MainWindow(QMainWindow):
         self._auto_fit_preview_to_frame(frame.shape[1], frame.shape[0])
 
     def set_ocr_boxes(self, boxes: list | None):
-        self.preview_widget.set_ocr_boxes(boxes)
+        # Only the dedicated OCR canvas should visualize detection boxes.
+        # Keep the live preview clean for capture framing.
+        self.preview_widget.clear_ocr_boxes()
         self.ocr_canvas.set_ocr_boxes(boxes)
 
     def set_ocr_canvas_frames(

@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>DesktopOCR User Guide</title>
+  <style>
+    body {
+      font-family: "Segoe UI", Roboto, "Noto Sans", sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #14161c;
+      color: #f7f8fb;
+      line-height: 1.6;
+    }
+    h1, h2, h3 {
+      color: #7dd3fc;
+      margin-top: 24px;
+    }
+    h1 { font-size: 28px; }
+    h2 { font-size: 22px; }
+    h3 { font-size: 18px; }
+    p { margin: 0 0 12px 0; }
+    ul { margin: 0 0 16px 20px; }
+    code {
+      background: rgba(255, 255, 255, 0.08);
+      padding: 2px 4px;
+      border-radius: 4px;
+      font-family: "JetBrains Mono", Consolas, monospace;
+    }
+    .pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: rgba(125, 211, 252, 0.2);
+      color: #7dd3fc;
+      font-size: 12px;
+      margin-right: 8px;
+    }
+    .section {
+      border-left: 3px solid rgba(125, 211, 252, 0.4);
+      padding-left: 14px;
+      margin-bottom: 24px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <h1>DesktopOCR — User Guide</h1>
+  <p>
+    DesktopOCR is optimized for Japanese VN subtitles: capture a region once, let PaddleOCR read
+    each frame, and review translated text, validators, and TTS from a single workflow.
+  </p>
+
+  <div class="section">
+    <h2>Workflow Overview</h2>
+    <ol>
+      <li><strong>Select a window or region.</strong> Use the top bar menu button → “Select Window” or supply a custom region.</li>
+      <li><strong>Capture & recognize.</strong> The preview column shows the live feed, OCR boxes, and the current transcription tray.</li>
+      <li><strong>Review outputs.</strong> History sidebar keeps every line. Optional validators (OpenAI, DeepSeek, Google Vision) can refine text.</li>
+      <li><strong>Translate & voice.</strong> Trigger translation/TTS from tray buttons or automatically via the side menu toggles.</li>
+    </ol>
+  </div>
+
+  <div class="section">
+    <h2>Top Bar Controls</h2>
+    <div class="grid">
+      <div class="card">
+        <span class="pill">Engine</span>
+        Switch between Paddle variants (pre-tuned for VNs), Windows OCR, or EasyOCR fallback.
+      </div>
+      <div class="card">
+        <span class="pill">Menu</span>
+        Opens the slide-in settings menu described below.
+      </div>
+      <div class="card">
+        <span class="pill">Select Window</span>
+        Pick any visible HWND. The app crops to the VN textbox band once per capture session.
+      </div>
+      <div class="card">
+        <span class="pill">Stop</span>
+        Releases the capture loop and validators; use this before closing or switching windows.
+      </div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>Side Menu Sections</h2>
+    <h3>Theme</h3>
+    <ul>
+      <li><strong>Auto</strong> tracks the OS theme (recommended).</li>
+      <li><strong>Dark / Light</strong> force a palette for all widgets.</li>
+    </ul>
+
+    <h3>Capture & Display Toggles</h3>
+    <ul>
+      <li>Auto-Capture, Auto-Copy, Auto-Read Selection</li>
+      <li>History Panel / Capture Preview visibility</li>
+      <li>VN Text Cleaner (validator assists)</li>
+    </ul>
+
+    <h3>Translation</h3>
+    <ul>
+      <li>Enable translation & auto-translate selection.</li>
+      <li>Backend choice: Auto (DeepL primary, Google fallback) or BYO Google/Libre.</li>
+      <li>LibreTranslate URL field appears when backend=“libre”.</li>
+    </ul>
+
+    <h3>AI Validators</h3>
+    <ul>
+      <li>OpenAI: toggle, API key, model, usage counters.</li>
+      <li>DeepSeek: toggle, budget-mode helper, API key + model.</li>
+      <li>Google Vision: toggle + API key entry.</li>
+    </ul>
+
+    <h3>Typography & Tray Size</h3>
+    <ul>
+      <li>Text Size presets (S/M/L) change the transcription tray font.</li>
+      <li>Text Area Size adjusts the tray height for long sentences.</li>
+    </ul>
+
+    <h3>Advanced</h3>
+    <ul>
+      <li>Diff Threshold slider (frame-change detection before recapture).</li>
+      <li>Reset to Defaults — restores every toggle and threshold.</li>
+      <li><strong>User Guide</strong> — opens this document.</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Widgets & Panels</h2>
+    <ul>
+      <li><strong>Preview Widget:</strong> Live frame with OCR boxes, capture guides, and status overlays.</li>
+      <li><strong>OCR Canvas:</strong> Displays the current Paddle crop and recognition output.</li>
+      <li><strong>Transcription Tray:</strong> Shows the latest recognized line, translation, validator hints, copy/recapture controls, and TTS buttons.</li>
+      <li><strong>History Sidebar:</strong> Scrollable log of prior lines with quick actions (translate, TTS, copy).</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Keyboard & Tips</h2>
+    <ul>
+      <li><strong>Ctrl+C</strong> copies the current tray text when Auto-Copy is disabled.</li>
+      <li><strong>Esc</strong> closes dialogs (User Guide, selection overlays, etc.).</li>
+      <li>Use <code>settings.json</code> for persistent defaults; the side menu updates this file automatically.</li>
+    </ul>
+  </div>
+
+  <p style="color:#9ca3af; font-size:13px;">
+    Last updated: April 2026 — DesktopOCR VN Stable build.
+  </p>
+</body>
+</html>

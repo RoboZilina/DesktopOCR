@@ -5,7 +5,7 @@ Three text areas: OCR output, full translation, selection translation.
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QTextEdit, QLabel, QPushButton, QFrame, QScrollArea,
+    QTextEdit, QLabel, QPushButton, QFrame, QScrollArea, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ui.theme import ThemePalette
@@ -39,12 +39,16 @@ class TranscriptionTray(QWidget):
 
         # --- OCR output row ---
         ocr_header = QHBoxLayout()
+        ocr_header.setContentsMargins(0, 0, 0, 0)
+        ocr_header.setSpacing(8)
+        ocr_header.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         ocr_label = self._make_header_label("OCR Output")
         ocr_header.addWidget(ocr_label)
         ocr_header.addStretch()
 
-        self._recapture_btn = QPushButton("🔄 Re-capture")
+        self._recapture_btn = QPushButton("Re-capture")
         self._recapture_btn.setFixedHeight(28)
+        self._recapture_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._recapture_btn.setStyleSheet(
             "background: #10b981; color: #000000; border: none; "
             "border-radius: 6px; padding: 4px 14px; font-weight: 700; font-size: 12px;"
@@ -68,22 +72,31 @@ class TranscriptionTray(QWidget):
 
         # --- Selection row ---
         sel_header = QHBoxLayout()
+        sel_header.setContentsMargins(0, 0, 0, 0)
+        sel_header.setSpacing(8)
+        sel_header.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         sel_label = self._make_header_label("Selection")
         sel_header.addWidget(sel_label)
         sel_header.addStretch()
 
 
-        self._speak_btn = QPushButton("\U0001F50A")
-        self._speak_btn.setFlat(True)
+        self._speak_btn = QPushButton("Speak")
+        self._speak_btn.setFixedHeight(28)
+        self._speak_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._speak_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._speak_btn.setStyleSheet(
+            "background: #1a1a1f; color: #10b981; border: 1px solid #2a2a2f; "
+            "border-radius: 6px; padding: 4px 14px; font-size: 12px; font-weight: 600;"
+        )
         self._speak_btn.clicked.connect(
             lambda: self.tts_requested.emit(
                 self._sel_text.toPlainText() or self._ocr_text.toPlainText()
             )
         )
         sel_header.addWidget(self._speak_btn)
-        self._translate_btn = QPushButton("🌐 Translate")
+        self._translate_btn = QPushButton("Translate")
         self._translate_btn.setFixedHeight(28)
+        self._translate_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._translate_btn.setStyleSheet(
             "background: #10b981; color: #000000; border: none; "
             "border-radius: 6px; padding: 4px 14px; font-weight: 700; font-size: 12px;"
@@ -201,7 +214,7 @@ class TranscriptionTray(QWidget):
         icon_bg = "#1a1a1f" if pal.is_dark else "#e2e8f0"
         self._speak_btn.setStyleSheet(
             f"background: {icon_bg}; color: {pal.accent}; border: 1px solid {pal.border}; "
-            "border-radius: 6px; font-size: 14px;"
+            "border-radius: 6px; padding: 4px 14px; font-size: 12px; font-weight: 600;"
         )
 
     def set_ocr_text(self, text: str):
@@ -220,7 +233,7 @@ class TranscriptionTray(QWidget):
             self._translate_btn.setText("Translating...")
         else:
             self._translate_btn.setEnabled(True)
-            self._translate_btn.setText("\U0001f310 Translate")
+            self._translate_btn.setText("Translate")
 
     def set_translation_error(self, message: str) -> None:
         """Display error message in the translation area with panic color."""
