@@ -38,16 +38,20 @@ logger = logging.getLogger(__name__)
 
 
 
+_VN_STABLE_MODE = os.getenv("DESKTOCR_VN_STABLE_MODE", "1") == "1"
 DET_THRESHOLD_BASE = max(0.10, float(os.getenv("DESKTOCR_DET_THRESHOLD", "0.15")))
 _VN_SCORE_THRESH = os.getenv("DESKTOCR_DET_SCORE_THRESH_VN")
-DET_BOX_THRESHOLD = max(
-    0.25,
-    float(
-        _VN_SCORE_THRESH
-        if _VN_SCORE_THRESH is not None
-        else os.getenv("DESKTOCR_DET_BOX_THRESHOLD", "0.50")
-    ),
-)
+if _VN_STABLE_MODE:
+    DET_BOX_THRESHOLD = 0.50
+else:
+    DET_BOX_THRESHOLD = max(
+        0.25,
+        float(
+            _VN_SCORE_THRESH
+            if _VN_SCORE_THRESH is not None
+            else os.getenv("DESKTOCR_DET_BOX_THRESHOLD", "0.50")
+        ),
+    )
 DET_UNCLIP_RATIO = min(3.0, max(1.0, float(os.getenv("DESKTOCR_DET_UNCLIP_RATIO", "2.5"))))
 DET_SCORE_MODE = os.getenv("DESKTOCR_DET_SCORE_MODE", "slow").strip().lower()
 DET_MIN_BOX_AREA = 40 * 40

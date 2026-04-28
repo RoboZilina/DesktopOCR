@@ -20,6 +20,8 @@ from logic.validator import clean_ocr_output, clean_ocr_output_enhanced, is_vali
 
 logger = logging.getLogger(__name__)
 
+_VN_STABLE_MODE = os.getenv("DESKTOCR_VN_STABLE_MODE", "1") == "1"
+
 _DET_MIN_WIDTH_PCT = float(os.getenv("DESKTOCR_MIN_W_PCT", "0.015"))
 _DET_MIN_HEIGHT_PCT = float(os.getenv("DESKTOCR_MIN_H_PCT", "0.05"))
 _DET_MIN_AREA_PCT = float(os.getenv("DESKTOCR_MIN_AREA_PCT", "0.00015"))
@@ -72,6 +74,41 @@ _TRIM_PAD_ENABLED = os.getenv("DESKTOCR_TRIM_PAD_ENABLE", "1") == "1"
 _TRIM_PAD_BOOST_ENABLED = os.getenv("DESKTOCR_TRIM_PAD_BOOST_ENABLE", "1") == "1"
 _TRIM_PAD_MARGIN = int(os.getenv("DESKTOCR_TRIM_PAD_MARGIN_PX", "3"))
 _TRIM_PAD_PROJ_THRESH = float(os.getenv("DESKTOCR_TRIM_PAD_PROJ_THRESH", "0.05"))
+
+VN_STABLE_CONFIG = {
+    "det_score_thresh": 0.50,
+    "max_filtered_boxes": 16,
+    "dup_x_tol": 2,
+    "dup_h_tol": 2,
+    "dup_cache": 32,
+    "tier_a_min": 0.20,
+    "tier_b_min": 0.50,
+    "tier_a_target": 0.49,
+    "single_span": True,
+    "trim_pad_boost": False,
+    "expand_for_recognition": True,
+}
+
+if _VN_STABLE_MODE:
+    _PRUNE_SINGLE_SPAN_MODE = VN_STABLE_CONFIG["single_span"]
+    _PRUNE_MAX_FILTERED_BOXES = VN_STABLE_CONFIG["max_filtered_boxes"]
+    _FILTER_DUP_X_TOL = VN_STABLE_CONFIG["dup_x_tol"]
+    _FILTER_DUP_H_TOL = VN_STABLE_CONFIG["dup_h_tol"]
+    _FILTER_RECENT_CACHE = VN_STABLE_CONFIG["dup_cache"]
+    _VN_SPAN_TIER_A_MIN = VN_STABLE_CONFIG["tier_a_min"]
+    _VN_SPAN_TIER_B_MIN = VN_STABLE_CONFIG["tier_b_min"]
+    _VN_SPAN_TIER_A_TARGET = VN_STABLE_CONFIG["tier_a_target"]
+    _TRIM_PAD_BOOST_ENABLED = VN_STABLE_CONFIG["trim_pad_boost"]
+    logger.info(
+        "[VNStable] Stable mode active; locking VN parameters (det=%.2f, cap=%d, span_tiers=%s)",
+        VN_STABLE_CONFIG["det_score_thresh"],
+        VN_STABLE_CONFIG["max_filtered_boxes"],
+        {
+            "tier_a_min": VN_STABLE_CONFIG["tier_a_min"],
+            "tier_b_min": VN_STABLE_CONFIG["tier_b_min"],
+            "tier_a_target": VN_STABLE_CONFIG["tier_a_target"],
+        },
+    )
 
 MIN_PRIMARY_JP_CHARS = 3
 MIN_CANDIDATE_JP_RATIO = 0.30
@@ -449,10 +486,16 @@ class EngineManager:
         if _PRUNE_SINGLE_SPAN_MODE and pruned_boxes:
             recognition_boxes, span_meta = self._collapse_to_single_span(pruned_boxes, w_img, h_img)
 
+        expand_for_recognition = (
+            VN_STABLE_CONFIG["expand_for_recognition"]
+            if _VN_STABLE_MODE
+            else (os.getenv("DESKTOCR_PADDLE_EXPAND", "1") == "1")
+        )
+
         primary, rec_stats = await self._recognize_box_groups(
             work_image,
             recognition_boxes,
-            expand_for_recognition=(os.getenv("DESKTOCR_PADDLE_EXPAND", "1") == "1"),
+            expand_for_recognition=expand_for_recognition,
         )
         final_text = (primary.get("text", "") or "").strip()
         final_conf = float(primary.get("confidence", 0.0) or 0.0)
