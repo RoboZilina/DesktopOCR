@@ -82,8 +82,9 @@ def preprocess_paddle_slice(image: np.ndarray) -> np.ndarray:
     clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP_LIMIT, tileGridSize=CLAHE_TILE_GRID_SIZE)
     enhanced = clahe.apply(gray)
     restored = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2BGR)
-    sharpened = cv2.filter2D(restored, -1, SHARPEN_KERNEL)
-    return sharpened
+    if os.getenv("DESKTOCR_SHARPEN", "0") == "1":
+        return cv2.filter2D(restored, -1, SHARPEN_KERNEL)
+    return restored
 
 
 def preprocess_natural_slice(image: np.ndarray) -> np.ndarray:
@@ -227,7 +228,10 @@ def crop_box(image: np.ndarray, box: list) -> np.ndarray | None:
 def filter_noise_boxes(boxes: list, min_area: int = MIN_BOX_AREA) -> list:
     filtered = []
     for box in boxes:
-        x1, y1, x2, y2 = box
+        x1, y1, x2, y2 = box[:4]
         if (x2 - x1) * (y2 - y1) >= min_area:
-            filtered.append(box)
+            kept = [x1, y1, x2, y2]
+            if len(box) > 4:
+                kept.extend(box[4:])
+            filtered.append(kept)
     return filtered

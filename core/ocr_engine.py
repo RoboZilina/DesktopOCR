@@ -418,7 +418,7 @@ class PaddleOCR:
 
 
 
-                boxes.append([x1, y1, x2, y2])
+                boxes.append([x1, y1, x2, y2, score])
 
 
 
