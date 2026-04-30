@@ -55,7 +55,6 @@ class SideMenu(QWidget):
         self._google_vision_toggle: tuple[QPushButton, QPushButton] | None = None
         self._capture_preview_toggle: tuple[QPushButton, QPushButton] | None = None
         self._ocr_canvas_toggle: tuple[QPushButton, QPushButton] | None = None
-        self._rare_highlight_toggle: tuple[QPushButton, QPushButton] | None = None
 
         # Outer layout: just holds the scroll area
         outer = QVBoxLayout(self)
@@ -214,7 +213,7 @@ class SideMenu(QWidget):
             "Translation Options", layout, default_open=False
         )
         translation_layout.addWidget(self._create_section_header("Translation"))
-        self._add_toggle_section(
+        self._translation_enabled_toggle = self._add_toggle_section(
             translation_layout, "Enable Translation",
             self.translation_enabled_changed, default=True
         )
@@ -413,6 +412,8 @@ class SideMenu(QWidget):
         )
         layout.addWidget(self._advanced_panel)
         self._advanced_panel.setVisible(False)
+        self._collapsible_buttons.append(self._advanced_toggle_btn)
+        self._collapsible_panels.append(self._advanced_panel)
 
         self._advanced_toggle_btn.clicked.connect(
             lambda checked: self._set_advanced_visible(bool(checked))
@@ -816,10 +817,24 @@ class SideMenu(QWidget):
         if emit_signal:
             self.auto_copy_changed.emit(enabled)
 
+    def set_translation_backend(self, backend_id: str, *, emit_signal: bool = False) -> None:
+        if backend_id not in self._backend_btns:
+            backend_id = "auto"  # safe fallback — matches DEFAULT_SETTINGS
+        for bid, btn in self._backend_btns.items():
+            btn.setChecked(bid == backend_id)
+        # LibreTranslate is hidden for now, so URL field stays hidden
+        if emit_signal:
+            self.translation_backend_changed.emit(backend_id)
+
     def set_auto_translate_selection(self, enabled: bool, *, emit_signal: bool = False) -> None:
         self._set_toggle_state(self._auto_translate_toggle, enabled)
         if emit_signal:
             self.auto_translate_selection_changed.emit(enabled)
+
+    def set_translation_enabled(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._translation_enabled_toggle, enabled)
+        if emit_signal:
+            self.translation_enabled_changed.emit(enabled)
 
     def set_highlight_rare_words(self, enabled: bool, *, emit_signal: bool = False) -> None:
         if hasattr(self, "_text_highlights_btn"):
@@ -907,6 +922,30 @@ class SideMenu(QWidget):
         self._set_toggle_state(self._capture_preview_toggle, enabled)
         if emit_signal:
             self.preview_visible_changed.emit(enabled)
+
+    def set_theme_id(self, theme_id: str, *, emit_signal: bool = False) -> None:
+        if theme_id not in self._theme_btns:
+            return
+        for tid, btn in self._theme_btns.items():
+            btn.setChecked(tid == theme_id)
+        if emit_signal:
+            self.theme_changed.emit(theme_id)
+
+    def set_text_size(self, size_id: str, *, emit_signal: bool = False) -> None:
+        if size_id not in self._size_btns:
+            return
+        for sid, btn in self._size_btns.items():
+            btn.setChecked(sid == size_id)
+        if emit_signal:
+            self.text_size_changed.emit(size_id)
+
+    def set_tray_height(self, size_id: str, *, emit_signal: bool = False) -> None:
+        if size_id not in self._tray_size_btns:
+            return
+        for sid, btn in self._tray_size_btns.items():
+            btn.setChecked(sid == size_id)
+        if emit_signal:
+            self.tray_height_changed.emit(size_id)
 
     def _set_advanced_visible(self, visible: bool) -> None:
         if not hasattr(self, "_advanced_panel"):

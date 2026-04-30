@@ -34,8 +34,16 @@ DEFAULT_SETTINGS = {
     "highlight_rare_words": False,
     "upscale_factor": 2.0,
     "history_visible": True,
-    "text_size": "standard",
+    "text_size": "medium",
+    "tray_height": "medium",
+    "theme": "auto",
     "tts_enabled": False,
+    "preview_visible": True,
+    "ocr_canvas_visible": False,
+    "vn_cleaner": True,
+    "diff_threshold": 8.0,
+    "dictionary_pass_enabled": True,
+    "kanji_pass_enabled": False,
     "confidence_threshold": 0.75,
     "poll_interval_ms": 500,
     "stabilize_wait_ms": 800,
@@ -538,27 +546,25 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             window.preview_widget.selection_overlay.region_changed.connect(_on_region_changed)
 
-            settings = {
-                "auto_capture": True,
-                "auto_copy": False,
-                "vn_cleaner": True,
-                "diff_threshold": DIFF_THRESHOLD,
-            }
-
             # Wire side menu toggles — all persist to settings_state on disk
+            _save_blocked = False
+            def _do_save():
+                if not _save_blocked:
+                    save_settings(settings_state)
+
             def _on_auto_capture_changed(enabled: bool):
                 settings_state["auto_capture"] = enabled
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.auto_capture_changed.connect(_on_auto_capture_changed)
 
             def _on_auto_copy_changed(enabled: bool):
                 settings_state["auto_copy"] = enabled
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.auto_copy_changed.connect(_on_auto_copy_changed)
 
             def _on_auto_read_selection_changed(enabled: bool):
                 settings_state["auto_read_selection"] = enabled
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.auto_read_selection_changed.connect(_on_auto_read_selection_changed)
 
             window.side_menu.history_visible_changed.connect(window.history_sidebar.setVisible)
@@ -566,33 +572,47 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_preview_visible_changed(enabled: bool):
                 settings_state["preview_visible"] = enabled
                 window.preview_widget.setVisible(enabled)
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.preview_visible_changed.connect(_on_preview_visible_changed)
 
+            def _on_text_size_changed(size_id: str):
+                settings_state["text_size"] = size_id
+                _do_save()
+            window.side_menu.text_size_changed.connect(_on_text_size_changed)
             window.side_menu.text_size_changed.connect(window.transcription_tray.set_text_size)
+
+            def _on_tray_height_changed(size_id: str):
+                settings_state["tray_height"] = size_id
+                _do_save()
+            window.side_menu.tray_height_changed.connect(_on_tray_height_changed)
             window.side_menu.tray_height_changed.connect(window.transcription_tray.set_tray_height)
+
+            def _on_theme_changed(theme_id: str):
+                settings_state["theme"] = theme_id
+                _do_save()
+            window.side_menu.theme_changed.connect(_on_theme_changed)
 
             def _on_auto_translate_selection_changed(enabled: bool):
                 settings_state["auto_translate_selection"] = enabled
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.auto_translate_selection_changed.connect(_on_auto_translate_selection_changed)
 
             def _on_translation_enabled_changed(enabled: bool):
                 settings_state["translation_enabled"] = enabled
                 window._on_translation_enabled_changed(enabled)
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.translation_enabled_changed.connect(_on_translation_enabled_changed)
 
             def _on_translation_backend_changed(backend_id: str):
                 settings_state["translation_backend"] = backend_id
                 window._on_translation_backend_changed(backend_id)
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.translation_backend_changed.connect(_on_translation_backend_changed)
 
             def _on_libre_url_changed(url: str):
                 settings_state["libre_translate_url"] = url or "http://localhost:5000"
                 window._on_libre_url_changed(url)
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.libre_url_changed.connect(_on_libre_url_changed)
 
             def _on_vn_cleaner_changed(enabled: bool):
@@ -601,38 +621,38 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     os.environ.pop("DESKTOCR_DISABLE_VALIDATOR", None)
                 else:
                     os.environ.__setitem__("DESKTOCR_DISABLE_VALIDATOR", "1")
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.vn_cleaner_changed.connect(_on_vn_cleaner_changed)
 
             def _on_ocr_canvas_visible_changed(enabled: bool):
                 settings_state["ocr_canvas_visible"] = enabled
                 window._on_ocr_canvas_visible_changed(enabled)
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.ocr_canvas_visible_changed.connect(_on_ocr_canvas_visible_changed)
 
             def _on_diff_threshold_changed(value: float):
                 settings_state["diff_threshold"] = value
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.diff_threshold_changed.connect(_on_diff_threshold_changed)
 
             def _on_highlight_rare_words_changed(enabled: bool):
                 settings_state["highlight_rare_words"] = enabled
                 window.transcription_tray.set_highlight_rare_words(enabled)
-                save_settings(settings_state)
+                _do_save()
 
             window.side_menu.highlight_rare_words_changed.connect(_on_highlight_rare_words_changed)
 
             def _on_dictionary_pass_changed(enabled: bool):
                 settings_state["dictionary_pass_enabled"] = enabled
                 window.transcription_tray.set_enable_dictionary_pass(enabled)
-                save_settings(settings_state)
+                _do_save()
 
             window.side_menu.dictionary_pass_changed.connect(_on_dictionary_pass_changed)
 
             def _on_kanji_pass_changed(enabled: bool):
                 settings_state["kanji_pass_enabled"] = enabled
                 window.transcription_tray.set_enable_kanji_pass(enabled)
-                save_settings(settings_state)
+                _do_save()
 
             window.side_menu.kanji_pass_changed.connect(_on_kanji_pass_changed)
 
@@ -640,7 +660,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_openai_enabled_changed(enabled: bool):
                 settings_state["openai_validator_enabled"] = enabled
                 openai_validator.update_settings(enabled=enabled)
-                save_settings(settings_state)
+                _do_save()
 
             window.side_menu.openai_validator_enabled_changed.connect(
                 _on_openai_enabled_changed
@@ -648,30 +668,30 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_openai_api_key_changed(key: str):
                 settings_state["openai_api_key"] = key
                 openai_validator.update_settings(api_key=key)
-                save_settings(settings_state)
+                _do_save()
                 _set_status_message("Ready", "OpenAI key updated")
             window.side_menu.openai_api_key_changed.connect(_on_openai_api_key_changed)
             def _on_openai_model_changed(model: str):
                 settings_state["openai_model"] = model
                 openai_validator.update_settings(model=model)
-                save_settings(settings_state)
+                _do_save()
             window.side_menu.openai_model_changed.connect(_on_openai_model_changed)
 
             def _on_deepseek_enabled_changed(enabled: bool):
                 settings_state["deepseek_validator_enabled"] = enabled
                 deepseek_validator.update_settings(enabled=enabled)
-                save_settings(settings_state)
+                _do_save()
 
             def _on_deepseek_api_key_changed(key: str):
                 settings_state["deepseek_api_key"] = key
                 deepseek_validator.update_settings(api_key=key)
-                save_settings(settings_state)
+                _do_save()
                 _set_status_message("Ready", "DeepSeek key updated")
 
             def _on_deepseek_model_changed(model: str):
                 settings_state["deepseek_model"] = model
                 deepseek_validator.update_settings(model=model)
-                save_settings(settings_state)
+                _do_save()
 
             window.side_menu.deepseek_validator_enabled_changed.connect(_on_deepseek_enabled_changed)
             window.side_menu.deepseek_api_key_changed.connect(_on_deepseek_api_key_changed)
@@ -680,17 +700,18 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_google_vision_enabled_changed(enabled: bool):
                 settings_state["google_vision_enabled"] = enabled
                 google_vision.update_settings(enabled=enabled)
-                save_settings(settings_state)
+                _do_save()
 
             def _on_google_vision_key_changed(key: str):
                 settings_state["google_vision_api_key"] = key
                 google_vision.update_settings(api_key=key)
-                save_settings(settings_state)
+                _do_save()
                 _set_status_message("Ready", "Google Vision key updated")
 
             window.side_menu.google_vision_enabled_changed.connect(_on_google_vision_enabled_changed)
             window.side_menu.google_vision_api_key_changed.connect(_on_google_vision_key_changed)
 
+            # --- Startup UI restoration (no signals to avoid save storms) ---
             window.transcription_tray.set_highlight_rare_words(
                 settings_state.get("highlight_rare_words", False)
             )
@@ -700,73 +721,144 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.transcription_tray.set_enable_kanji_pass(
                 settings_state.get("kanji_pass_enabled", False)
             )
+            # Restore side menu toggles without emitting signals
             window.side_menu.set_auto_read_selection(
-                settings_state.get("auto_read_selection", False),
-                emit_signal=True,
+                settings_state.get("auto_read_selection", False), emit_signal=False
             )
+            if hasattr(window.side_menu, "set_translation_enabled"):
+                window.side_menu.set_translation_enabled(
+                    settings_state.get("translation_enabled", True), emit_signal=False
+                )
             window.side_menu.set_auto_translate_selection(
-                settings_state.get("auto_translate_selection", False),
-                emit_signal=True,
+                settings_state.get("auto_translate_selection", False), emit_signal=False
             )
             window.side_menu.set_highlight_rare_words(
-                settings_state.get("highlight_rare_words", False),
-                emit_signal=True,
+                settings_state.get("highlight_rare_words", False), emit_signal=False
             )
             window.side_menu.set_enable_dictionary_pass(
-                settings_state.get("dictionary_pass_enabled", True),
-                emit_signal=True,
+                settings_state.get("dictionary_pass_enabled", True), emit_signal=False
             )
             window.side_menu.set_enable_kanji_pass(
-                settings_state.get("kanji_pass_enabled", False),
-                emit_signal=True,
+                settings_state.get("kanji_pass_enabled", False), emit_signal=False
             )
-            # Restore additional saved settings
             window.side_menu.set_auto_capture(
-                settings_state.get("auto_capture", True), emit_signal=True
+                settings_state.get("auto_capture", True), emit_signal=False
             )
             window.side_menu.set_auto_copy(
-                settings_state.get("auto_copy", True), emit_signal=True
+                settings_state.get("auto_copy", True), emit_signal=False
             )
             if hasattr(window.side_menu, "set_preview_visible"):
                 window.side_menu.set_preview_visible(
-                    settings_state.get("preview_visible", True), emit_signal=True
+                    settings_state.get("preview_visible", True), emit_signal=False
                 )
             if hasattr(window.side_menu, "set_ocr_canvas_visible"):
                 window.side_menu.set_ocr_canvas_visible(
-                    settings_state.get("ocr_canvas_visible", False), emit_signal=True
+                    settings_state.get("ocr_canvas_visible", False), emit_signal=False
                 )
             window.side_menu.set_openai_validator_enabled(
-                settings_state.get("openai_validator_enabled", False),
-                emit_signal=True,
+                settings_state.get("openai_validator_enabled", False), emit_signal=False
             )
             window.side_menu.set_openai_api_key(settings_state.get("openai_api_key", ""))
             window.side_menu.set_openai_model(settings_state.get("openai_model", "gpt-4o-mini"))
             window.side_menu.set_deepseek_validator_enabled(
-                settings_state.get("deepseek_validator_enabled", False),
-                emit_signal=True,
+                settings_state.get("deepseek_validator_enabled", False), emit_signal=False
             )
             window.side_menu.set_deepseek_api_key(settings_state.get("deepseek_api_key", ""))
             window.side_menu.set_deepseek_model(settings_state.get("deepseek_model", "deepseek-chat"))
             window.side_menu.set_google_vision_enabled(
-                settings_state.get("google_vision_enabled", False),
-                emit_signal=True,
+                settings_state.get("google_vision_enabled", False), emit_signal=False
             )
             window.side_menu.set_google_vision_api_key(settings_state.get("google_vision_api_key", ""))
-
-            window.side_menu.reset_requested.connect(
-                lambda: [
-                    settings.update({"auto_capture": True, "auto_copy": False, "vn_cleaner": True, "diff_threshold": 8.0}),
-                    window.side_menu.auto_capture_changed.emit(True),
-                    window.side_menu.auto_copy_changed.emit(False),
-                    window.side_menu.auto_read_selection_changed.emit(False),
-                    window.side_menu.vn_cleaner_changed.emit(True),
-                    window.side_menu.diff_threshold_changed.emit(8.0),
-                    window.side_menu.auto_translate_selection_changed.emit(False),
-                    window.side_menu.highlight_rare_words_changed.emit(False),
-                    window.side_menu.dictionary_pass_changed.emit(True),
-                    window.side_menu.kanji_pass_changed.emit(False),
-                ]
+            # Theme, text size, tray height
+            if hasattr(window.side_menu, "set_theme_id"):
+                window.side_menu.set_theme_id(
+                    settings_state.get("theme", "auto"), emit_signal=False
+                )
+            if hasattr(window.side_menu, "set_text_size"):
+                window.side_menu.set_text_size(
+                    settings_state.get("text_size", "medium"), emit_signal=False
+                )
+            if hasattr(window.side_menu, "set_tray_height"):
+                window.side_menu.set_tray_height(
+                    settings_state.get("tray_height", "medium"), emit_signal=False
+                )
+            # Apply side effects that signal handlers normally perform
+            window.preview_widget.setVisible(
+                settings_state.get("preview_visible", True)
             )
+            window._on_ocr_canvas_visible_changed(
+                settings_state.get("ocr_canvas_visible", False)
+            )
+            window._on_translation_enabled_changed(
+                settings_state.get("translation_enabled", True)
+            )
+            if hasattr(window.side_menu, "set_translation_backend"):
+                window.side_menu.set_translation_backend(
+                    settings_state.get("translation_backend", "auto"), emit_signal=False
+                )
+            window._on_translation_backend_changed(
+                settings_state.get("translation_backend", "auto")
+            )
+            window._on_libre_url_changed(
+                settings_state.get("libre_translate_url", "http://localhost:5000")
+            )
+            # Apply theme side effect
+            theme_id = settings_state.get("theme", "auto")
+            if theme_id != "auto":
+                window._apply_theme(theme_id)
+            # Apply text size / tray height side effects
+            window.transcription_tray.set_text_size(
+                settings_state.get("text_size", "medium")
+            )
+            window.transcription_tray.set_tray_height(
+                settings_state.get("tray_height", "medium")
+            )
+
+            # --- Reset ---
+            def _on_reset_requested():
+                nonlocal _save_blocked
+                _save_blocked = True
+                # UI state (signals fire but saves are blocked)
+                window.side_menu.set_auto_capture(True, emit_signal=True)
+                window.side_menu.set_auto_copy(False, emit_signal=True)
+                window.side_menu.set_auto_read_selection(False, emit_signal=True)
+                window.side_menu.set_auto_translate_selection(False, emit_signal=True)
+                window.side_menu.set_highlight_rare_words(False, emit_signal=True)
+                window.side_menu.set_enable_dictionary_pass(True, emit_signal=True)
+                window.side_menu.set_enable_kanji_pass(False, emit_signal=True)
+                window.side_menu.set_preview_visible(True, emit_signal=True)
+                window.side_menu.set_ocr_canvas_visible(False, emit_signal=True)
+                window.side_menu.set_openai_validator_enabled(False, emit_signal=True)
+                window.side_menu.set_openai_api_key("")
+                window.side_menu.set_openai_model("gpt-4o-mini")
+                window.side_menu.set_deepseek_validator_enabled(False, emit_signal=True)
+                window.side_menu.set_deepseek_api_key("")
+                window.side_menu.set_deepseek_model("deepseek-chat")
+                window.side_menu.set_google_vision_enabled(False, emit_signal=True)
+                window.side_menu.set_google_vision_api_key("")
+                if hasattr(window.side_menu, "set_theme_id"):
+                    window.side_menu.set_theme_id("auto", emit_signal=True)
+                if hasattr(window.side_menu, "set_text_size"):
+                    window.side_menu.set_text_size("medium", emit_signal=True)
+                if hasattr(window.side_menu, "set_tray_height"):
+                    window.side_menu.set_tray_height("medium", emit_signal=True)
+                # Diff threshold
+                window.side_menu._threshold_slider.setValue(8)
+                window.side_menu._threshold_label.setText("8")
+                window.side_menu.diff_threshold_changed.emit(8.0)
+                # VN cleaner
+                window.side_menu.vn_cleaner_changed.emit(True)
+                # Translation
+                window.side_menu.translation_enabled_changed.emit(True)
+                if hasattr(window.side_menu, "set_translation_backend"):
+                    window.side_menu.set_translation_backend("auto", emit_signal=True)
+                elif hasattr(window.side_menu, "_on_translation_backend_clicked"):
+                    window.side_menu._on_translation_backend_clicked("auto")
+                # Save once
+                _save_blocked = False
+                _do_save()
+
+            window.side_menu.reset_requested.connect(_on_reset_requested)
 
             # TTS manager (Edge TTS active, OpenJTalk fallback)
             tts = TTSManager([
@@ -840,11 +932,11 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     full_frame = await capture.get_frame(full=True)
                     if full_frame is not None:
                         window.set_preview_frame(full_frame)
-                        if settings["auto_capture"] and selection_ready:
+                        if settings_state["auto_capture"] and selection_ready:
                             region = capture.region or (0, 0, full_frame.shape[1], full_frame.shape[0])
                             crop_frame = _manual_crop(full_frame, region)
                             diff = _compute_diff(crop_frame, ref_frame)
-                            if diff > settings["diff_threshold"]:
+                            if diff > settings_state["diff_threshold"]:
                                 ref_frame = crop_frame.copy()
                                 if _stabilize_task and not _stabilize_task.done():
                                     _stabilize_task.cancel()
@@ -860,7 +952,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     if not selection_ready:
                         await asyncio.sleep(0.2)
                         continue
-                    if settings["auto_capture"]:
+                    if settings_state["auto_capture"]:
                         try:
                             await asyncio.wait_for(ocr_trigger.wait(), timeout=0.5)
                             ocr_trigger.clear()
@@ -902,7 +994,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
                         if text:
                             window.set_ocr_result(text, float(conf), engine_id, timestamp)
-                        if settings["auto_copy"] and text:
+                        if settings_state["auto_copy"] and text:
                             from PyQt6.QtWidgets import QApplication
                             QApplication.clipboard().setText(text)
                             
