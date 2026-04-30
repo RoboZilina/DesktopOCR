@@ -524,6 +524,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 w = int(nw * imgW)
                 h = int(nh * imgH)
                 capture.set_region(x, y, w, h)
+                capture._last_full_hash = None
+                capture._last_crop_hash = None
                 logger.info("Region selected: x=%d y=%d w=%d h=%d", x, y, w, h)
                 ref_frame = None
                 pipeline.invalidate_generation()
