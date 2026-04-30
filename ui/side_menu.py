@@ -15,7 +15,6 @@ class SideMenu(QWidget):
     auto_capture_changed     = pyqtSignal(bool)
     auto_copy_changed        = pyqtSignal(bool)
     auto_read_selection_changed = pyqtSignal(bool)
-    highlight_rare_words_changed = pyqtSignal(bool)
     dictionary_pass_changed  = pyqtSignal(bool)
     kanji_pass_changed       = pyqtSignal(bool)
     history_visible_changed  = pyqtSignal(bool)
@@ -160,9 +159,6 @@ class SideMenu(QWidget):
             "Text Highlights", layout, default_open=False
         )
         self._text_highlights_panel = th_layout.parentWidget()
-        self._text_highlights_btn.clicked.connect(
-            lambda checked: self.highlight_rare_words_changed.emit(checked)
-        )
 
         self._dictionary_pass_toggle = self._add_toggle_section(
             th_layout,
@@ -674,7 +670,6 @@ class SideMenu(QWidget):
         self.theme_changed.emit("auto")
         self.set_auto_read_selection(False)
         self.set_auto_translate_selection(False)
-        self.set_highlight_rare_words(False, emit_signal=True)
         self.set_enable_dictionary_pass(True, emit_signal=True)
         self.set_enable_kanji_pass(False, emit_signal=True)
         self.set_preview_visible(True, emit_signal=True)
@@ -849,16 +844,6 @@ class SideMenu(QWidget):
 
         if emit_signal:
             self.diff_threshold_changed.emit(float(int_value))
-
-    def set_highlight_rare_words(self, enabled: bool, *, emit_signal: bool = False) -> None:
-        if hasattr(self, "_text_highlights_btn"):
-            block = self._text_highlights_btn.blockSignals(True)
-            self._text_highlights_btn.setChecked(enabled)
-            self._text_highlights_btn.blockSignals(block)
-        if hasattr(self, "_text_highlights_panel"):
-            self._text_highlights_panel.setVisible(enabled)
-        if emit_signal:
-            self.highlight_rare_words_changed.emit(enabled)
 
     def set_enable_dictionary_pass(self, enabled: bool, *, emit_signal: bool = False) -> None:
         self._set_toggle_state(self._dictionary_pass_toggle, enabled)

@@ -73,7 +73,6 @@ class TranscriptionTray(QWidget):
         super().__init__(parent)
         self.setStyleSheet("background: transparent; border-top: 1px solid transparent;")
         self._primary_buttons: list[QPushButton] = []
-        self._highlight_rare_words = False
         self._enable_dictionary_pass = True
         self._enable_kanji_pass = False
         self._latest_ocr_text: str = ""
@@ -264,8 +263,6 @@ class TranscriptionTray(QWidget):
         normalized = text or ""
         self._latest_selection_text = normalized
         self._sel_text.setPlainText(normalized)
-        if not self._highlight_rare_words:
-            return
         self._apply_token_highlighting(self._sel_text, normalized)
 
     def set_translating(self, busy: bool) -> None:
@@ -300,27 +297,15 @@ class TranscriptionTray(QWidget):
             }}
         """)
 
-    def set_highlight_rare_words(self, enabled: bool) -> None:
-        enabled = bool(enabled)
-        self._highlight_rare_words = enabled
-        if not enabled:
-            self._clear_underlines(self._ocr_text)
-            self._clear_underlines(self._sel_text)
-            return
+    def set_enable_dictionary_pass(self, enabled: bool) -> None:
+        self._enable_dictionary_pass = bool(enabled)
         self._apply_token_highlighting(self._ocr_text, self._latest_ocr_text)
         self._apply_token_highlighting(self._sel_text, self._latest_selection_text)
 
-    def set_enable_dictionary_pass(self, enabled: bool) -> None:
-        self._enable_dictionary_pass = bool(enabled)
-        if self._highlight_rare_words:
-            self._apply_token_highlighting(self._ocr_text, self._latest_ocr_text)
-            self._apply_token_highlighting(self._sel_text, self._latest_selection_text)
-
     def set_enable_kanji_pass(self, enabled: bool) -> None:
         self._enable_kanji_pass = bool(enabled)
-        if self._highlight_rare_words:
-            self._apply_token_highlighting(self._ocr_text, self._latest_ocr_text)
-            self._apply_token_highlighting(self._sel_text, self._latest_selection_text)
+        self._apply_token_highlighting(self._ocr_text, self._latest_ocr_text)
+        self._apply_token_highlighting(self._sel_text, self._latest_selection_text)
 
     def _make_header_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
@@ -357,11 +342,7 @@ class TranscriptionTray(QWidget):
         return self._sel_text.toPlainText()
 
     def _apply_token_highlighting(self, widget: QTextEdit, text: str) -> None:
-        if not self._highlight_rare_words:
-            return
         if not text:
-            return
-        if not (self._enable_dictionary_pass or self._enable_kanji_pass):
             return
 
         cursor = widget.textCursor()
@@ -453,14 +434,6 @@ class TranscriptionTray(QWidget):
             return int(rank)
         except (TypeError, ValueError):
             return None
-
-    def _clear_underlines(self, widget: QTextEdit) -> None:
-        cursor = widget.textCursor()
-        cursor.beginEditBlock()
-        cursor.select(QTextCursor.SelectionType.Document)
-        cursor.mergeCharFormat(self._clear_char_format)
-        cursor.clearSelection()
-        cursor.endEditBlock()
 
     def _build_tokens(self, text: str) -> list[_RenderToken]:
         if not text:

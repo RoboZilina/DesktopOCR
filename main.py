@@ -30,7 +30,6 @@ DEFAULT_SETTINGS = {
     "auto_copy": True,
     "auto_read_selection": False,
     "auto_translate_selection": False,
-    "highlight_rare_words": False,
     "history_visible": True,
     "text_size": "medium",
     "tray_height": "medium",
@@ -531,7 +530,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 pipeline.invalidate_generation()
                 _capture_gen += 1
                 selection_ready = True
-                window.clear_preview(clear_selection=False)
                 ocr_trigger.clear()
 
             window.preview_widget.selection_overlay.region_changed.connect(_on_region_changed)
@@ -559,6 +557,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             def _on_history_visible_changed(visible: bool):
                 settings_state["history_visible"] = visible
+                window.history_sidebar.setVisible(visible)
                 _do_save()
             window.side_menu.history_visible_changed.connect(_on_history_visible_changed)
 
@@ -621,13 +620,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state["diff_threshold"] = value
                 _do_save()
             window.side_menu.diff_threshold_changed.connect(_on_diff_threshold_changed)
-
-            def _on_highlight_rare_words_changed(enabled: bool):
-                settings_state["highlight_rare_words"] = enabled
-                window.transcription_tray.set_highlight_rare_words(enabled)
-                _do_save()
-
-            window.side_menu.highlight_rare_words_changed.connect(_on_highlight_rare_words_changed)
 
             def _on_dictionary_pass_changed(enabled: bool):
                 settings_state["dictionary_pass_enabled"] = enabled
@@ -699,9 +691,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.side_menu.google_vision_api_key_changed.connect(_on_google_vision_key_changed)
 
             # --- Startup UI restoration (no signals to avoid save storms) ---
-            window.transcription_tray.set_highlight_rare_words(
-                settings_state.get("highlight_rare_words", False)
-            )
             window.transcription_tray.set_enable_dictionary_pass(
                 settings_state.get("dictionary_pass_enabled", True)
             )
@@ -718,9 +707,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 )
             window.side_menu.set_auto_translate_selection(
                 settings_state.get("auto_translate_selection", False), emit_signal=False
-            )
-            window.side_menu.set_highlight_rare_words(
-                settings_state.get("highlight_rare_words", False), emit_signal=False
             )
             window.side_menu.set_enable_dictionary_pass(
                 settings_state.get("dictionary_pass_enabled", True), emit_signal=False
@@ -787,6 +773,12 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window._on_ocr_canvas_visible_changed(
                 settings_state.get("ocr_canvas_visible", False)
             )
+            window._on_auto_read_selection_changed(
+                settings_state.get("auto_read_selection", False)
+            )
+            window._on_auto_translate_selection_changed(
+                settings_state.get("auto_translate_selection", False)
+            )
             window._on_translation_enabled_changed(
                 settings_state.get("translation_enabled", True)
             )
@@ -829,8 +821,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     window.side_menu.set_auto_translate_selection(defaults.get("auto_translate_selection", False), emit_signal=es)
 
                 # Text highlights / passes
-                if hasattr(window.side_menu, "set_highlight_rare_words"):
-                    window.side_menu.set_highlight_rare_words(defaults.get("highlight_rare_words", False), emit_signal=es)
                 if hasattr(window.side_menu, "set_enable_dictionary_pass"):
                     window.side_menu.set_enable_dictionary_pass(defaults.get("dictionary_pass_enabled", True), emit_signal=es)
                 if hasattr(window.side_menu, "set_enable_kanji_pass"):
@@ -974,10 +964,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     if full_frame is not None:
                         window.set_preview_frame(full_frame)
                         if settings_state["auto_capture"] and selection_ready:
-                            frame = await capture.get_frame()
-                            if frame is None:
-                                await asyncio.sleep(PREVIEW_INTERVAL)
-                                continue
                             if _stabilize_task and not _stabilize_task.done():
                                 _stabilize_task.cancel()
                             _stabilize_task = asyncio.ensure_future(_trigger_after_stabilize())
