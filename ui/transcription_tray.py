@@ -4,15 +4,17 @@ Three text areas: OCR output, full translation, selection translation.
 """
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 
 from PyQt6.QtWidgets import (
+    QApplication,
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QLabel, QPushButton, QFrame, QScrollArea, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
+from PyQt6.QtGui import QColor, QBrush, QTextCharFormat, QTextCursor
 
 from core.frequency import annotator as freq_annotator
 from core.frequency import kanji_freq
@@ -78,6 +80,9 @@ class TranscriptionTray(QWidget):
         self._latest_selection_text: str = ""
         self._rare_format_cache: dict[str, QTextCharFormat] = {}
         self._kanji_format_cache: dict[int, QTextCharFormat] = {}
+        self._clear_char_format = QTextCharFormat()
+        self._clear_char_format.setUnderlineStyle(QTextCharFormat.UnderlineStyle.NoUnderline)
+        self._clear_char_format.setBackground(QBrush(Qt.BrushStyle.NoBrush))
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
@@ -354,16 +359,26 @@ class TranscriptionTray(QWidget):
     def _apply_token_highlighting(self, widget: QTextEdit, text: str) -> None:
         if not self._highlight_rare_words:
             return
+        if not text:
+            return
+        if not (self._enable_dictionary_pass or self._enable_kanji_pass):
+            return
 
         cursor = widget.textCursor()
+        if (
+            cursor.anchor() != cursor.position()
+            and QApplication.mouseButtons() & Qt.MouseButton.LeftButton
+        ):
+            return
+
         saved_pos, saved_anchor = cursor.position(), cursor.anchor()
 
         try:
             cursor.beginEditBlock()
 
-            # 1. Clear all previous pipeline formatting once
+            # 1. Clear only the underline/background we own
             cursor.select(QTextCursor.SelectionType.Document)
-            cursor.setCharFormat(QTextCharFormat())
+            cursor.mergeCharFormat(self._clear_char_format)
             cursor.clearSelection()
 
             # 2. Dictionary pass (Pass 1) — underline only
@@ -390,7 +405,9 @@ class TranscriptionTray(QWidget):
                         cursor.clearSelection()
                         logger.debug("Applied dictionary highlighting to %d tokens", len(tokens))
                     else:
-                        logger.warning("Skipping dictionary highlighting: frequency data unavailable after annotation")
+                        logger.warning(
+                            "Skipping dictionary highlighting: frequency data unavailable after annotation"
+                        )
                 else:
                     logger.debug("No dictionary tokens to highlight")
             elif self._enable_dictionary_pass:
@@ -441,7 +458,7 @@ class TranscriptionTray(QWidget):
         cursor = widget.textCursor()
         cursor.beginEditBlock()
         cursor.select(QTextCursor.SelectionType.Document)
-        cursor.setCharFormat(QTextCharFormat())
+        cursor.mergeCharFormat(self._clear_char_format)
         cursor.clearSelection()
         cursor.endEditBlock()
 
@@ -449,68 +466,9 @@ class TranscriptionTray(QWidget):
         if not text:
             return []
 
-        import os
-        import time
-
-        from core.frequency import jp_freq
-
-        freq: dict[str, int] = {}
-        try:
-            loaded = jp_freq.load()
-        except Exception:
-            logger.exception("Failed to load frequency data for tokenizer")
-            loaded = {}
-
-        if isinstance(loaded, dict):
-            freq = {
-                k: int(v)
-                for k, v in loaded.items()
-                if isinstance(k, str) and k
-            }
-        elif isinstance(loaded, list):
-            tmp: dict[str, int] = {}
-            for entry in loaded:
-                try:
-                    lemma, rank = entry
-                except Exception:
-                    continue
-                if not isinstance(lemma, str) or not lemma:
-                    continue
-                try:
-                    tmp[lemma] = int(rank)
-                except (TypeError, ValueError):
-                    continue
-            freq = tmp
-        elif hasattr(loaded, "columns") and hasattr(loaded, "__getitem__"):
-            tmp: dict[str, int] = {}
-            try:
-                lemmas = loaded["lemma"]
-                ranks = loaded["rank"]
-                for lemma, rank in zip(lemmas, ranks):
-                    if not isinstance(lemma, str) or not lemma:
-                        continue
-                    try:
-                        tmp[lemma] = int(rank)
-                    except (TypeError, ValueError):
-                        continue
-            except Exception:
-                tmp = {}
-            freq = tmp
-        else:
-            freq = {}
-
-        build_start = time.perf_counter()
-        lemmas_by_length: dict[int, set[str]] = {}
-        for lemma in freq.keys():
-            length = len(lemma)
-            if length <= 0:
-                continue
-            bucket = lemmas_by_length.setdefault(length, set())
-            bucket.add(lemma)
+        freq = freq_annotator.get_freq_table()
+        lemmas_by_length = freq_annotator.get_lemmas_by_length()
         max_len = min(12, max(lemmas_by_length.keys(), default=1))
-        build_elapsed = time.perf_counter() - build_start
-        if os.getenv("DESKTOPOCR_DEBUG"):
-            logger.debug("lemmas_by_length built in %.4fs (max_len=%d)", build_elapsed, max_len)
 
         def _make_token(surface: str, start: int, end: int) -> _RenderToken:
             try:

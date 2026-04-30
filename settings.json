@@ -26,5 +26,5 @@
   "google_vision_enabled": false,
   "google_vision_api_key": "",
   "dictionary_pass_enabled": true,
-  "kanji_pass_enabled": true
+  "kanji_pass_enabled": false
 }

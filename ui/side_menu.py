@@ -151,21 +151,22 @@ class SideMenu(QWidget):
         self._tray_size_btns["medium"].setChecked(True)
         layout.addLayout(tray_row)
 
-        layout.addWidget(self._create_section_header("Text Highlights"))
-        self._rare_highlight_toggle = self._add_toggle_section(
-            layout,
-            "Highlight Rare Words",
-            self.highlight_rare_words_changed,
-            default=False,
+        self._text_highlights_btn, th_layout = self._create_collapsible_group(
+            "Text Highlights", layout, default_open=False
         )
+        self._text_highlights_panel = th_layout.parentWidget()
+        self._text_highlights_btn.clicked.connect(
+            lambda checked: self.highlight_rare_words_changed.emit(checked)
+        )
+
         self._dictionary_pass_toggle = self._add_toggle_section(
-            layout,
+            th_layout,
             "Dictionary Pass",
             self.dictionary_pass_changed,
             default=True,
         )
         self._kanji_pass_toggle = self._add_toggle_section(
-            layout,
+            th_layout,
             "Kanji Pass",
             self.kanji_pass_changed,
             default=False,
@@ -688,7 +689,12 @@ class SideMenu(QWidget):
             self.auto_translate_selection_changed.emit(enabled)
 
     def set_highlight_rare_words(self, enabled: bool, *, emit_signal: bool = False) -> None:
-        self._set_toggle_state(self._rare_highlight_toggle, enabled)
+        if hasattr(self, "_text_highlights_btn"):
+            block = self._text_highlights_btn.blockSignals(True)
+            self._text_highlights_btn.setChecked(enabled)
+            self._text_highlights_btn.blockSignals(block)
+        if hasattr(self, "_text_highlights_panel"):
+            self._text_highlights_panel.setVisible(enabled)
         if emit_signal:
             self.highlight_rare_words_changed.emit(enabled)
 
