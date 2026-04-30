@@ -36,7 +36,6 @@ class CapturePipeline:
         self._deepseek_validator = deepseek_validator
         
         self.capture_generation = 0
-        self.is_processing = False
         self._last_result = ""
         self._lock = asyncio.Lock()
 
@@ -49,6 +48,10 @@ class CapturePipeline:
             "chars_emitted": 0,
         }
         self._stats_log_every = 20
+
+    @property
+    def is_processing(self) -> bool:
+        return self._lock.locked()
 
     def set_line_count(self, n: int) -> None:
         try:
@@ -66,65 +69,59 @@ class CapturePipeline:
         Captures a frame and processes it via the OCR engine.
         Returns {"text": str, "confidence": float} or None.
         """
-        if self.is_processing:
-            return None
-
-        self.is_processing = True
-        self.capture_generation += 1
-        my_gen = self.capture_generation
-        
-        try:
-            frame = await self.capture.get_frame()
-            if frame is None:
-                return None
-                
-            if self.capture_generation != my_gen:
-                return None
-                
-            res = None
-            if self._google_vision and self._google_vision.is_enabled():
-                res = await self._run_google_vision(frame)
-
-            if res is None:
-                res = await self.engine_manager.run_ocr(frame, line_count=line_count)
+        async with self._lock:
+            self.capture_generation += 1
+            my_gen = self.capture_generation
             
-            if self.capture_generation != my_gen:
-                return None
+            try:
+                frame = await self.capture.get_frame()
+                if frame is None:
+                    return None
                 
-            text = (res.get("text", "") or "").strip()
-            text = clean_ocr_output_enhanced(text)
-            meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                if self.capture_generation != my_gen:
+                    return None
+                
+                res = None
+                if self._google_vision and self._google_vision.is_enabled():
+                    res = await self._run_google_vision(frame)
 
-            text, meta = await self._apply_ai_validators(text, meta)
-            res["text"] = text
-            res["meta"] = meta
-            conf = res.get("confidence")
-            res["confidence"] = conf if conf is not None else 0.0
-            self._update_stats(meta)
+                if res is None:
+                    res = await self.engine_manager.run_ocr(frame, line_count=line_count)
+                
+                if self.capture_generation != my_gen:
+                    return None
+                
+                text = (res.get("text", "") or "").strip()
+                meta = res.get("meta", {}) if isinstance(res, dict) else {}
 
-            if not text:
+                text, meta = await self._apply_ai_validators(text, meta)
+                res["text"] = text
+                res["meta"] = meta
+                conf = res.get("confidence")
+                res["confidence"] = conf if conf is not None else 0.0
+                self._update_stats(meta)
+
+                if not text:
+                    self._maybe_log_stats()
+                    return None
+
+                self._last_result = text
+                self._stats["chars_emitted"] += len(text)
                 self._maybe_log_stats()
-                return None
+                if isinstance(res, dict):
+                    res["frame"] = frame.copy()
+                    return res
 
-            self._last_result = text
-            self._stats["chars_emitted"] += len(text)
-            self._maybe_log_stats()
-            if isinstance(res, dict):
-                res["frame"] = frame.copy()
-                return res
-
-            return {
-                "text": text,
-                "confidence": conf if conf is not None else 0.0,
-                "meta": meta,
-                "frame": frame.copy(),
-            }
+                return {
+                    "text": text,
+                    "confidence": conf if conf is not None else 0.0,
+                    "meta": meta,
+                    "frame": frame.copy(),
+                }
             
-        except Exception as e:
-            logger.error(f"Error during capture_once: {e}")
-            return None
-        finally:
-            self.is_processing = False
+            except Exception as e:
+                logger.error(f"Error during capture_once: {e}")
+                return None
 
     async def _apply_ai_validators(self, text: str, meta: dict | None) -> tuple[str, dict]:
         if not text:

@@ -286,7 +286,8 @@ class ScreenCapture:
     def __init__(self, hwnd: int) -> None:
         self._hwnd: int = hwnd
         self._region: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h)
-        self.last_frame_hash: Optional[str] = None
+        self._last_full_hash: Optional[str] = None
+        self._last_crop_hash: Optional[str] = None
 
         # WinRT objects — initialised lazily in _ensure_session()
         self._d3d_device = None
@@ -300,6 +301,7 @@ class ScreenCapture:
 
         self._stopped: bool = False
         self._session_ready: bool = False
+        self._active_future: Optional[asyncio.Future] = None
 
         # Fallback flag — set True if WinRT init fails
         self._use_bitblt: bool = False
@@ -478,12 +480,15 @@ class ScreenCapture:
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[Optional[np.ndarray]] = loop.create_future()
+        self._active_future = future
 
         def _on_frame_arrived(sender, _args) -> None:
             """
             winsdk 0.10.0 — frame_arrived callback receives the FramePool as sender.
             Call try_get_next_frame() on sender (the pool), not on the session.
             """
+            if self._stopped:
+                return
             try:
                 # winsdk 0.10.0 — try_get_next_frame() returns Direct3D11CaptureFrame or None
                 frame = sender.try_get_next_frame()
@@ -494,11 +499,21 @@ class ScreenCapture:
                 # Convert on the thread-pool thread so the event loop stays free
                 arr = self._frame_to_numpy(frame)
                 frame.close()   # winsdk 0.10.0 — Direct3D11CaptureFrame is IClosable
-                if not future.done():
-                    loop.call_soon_threadsafe(future.set_result, arr)
+                def _safe_set_result(fut, val):
+                    if not fut.done():
+                        try:
+                            fut.set_result(val)
+                        except Exception:
+                            pass
+                loop.call_soon_threadsafe(_safe_set_result, future, arr)
             except Exception as exc:
-                if not future.done():
-                    loop.call_soon_threadsafe(future.set_exception, exc)
+                def _safe_set_exception(fut, err):
+                    if not fut.done():
+                        try:
+                            fut.set_exception(err)
+                        except Exception:
+                            pass
+                loop.call_soon_threadsafe(_safe_set_exception, future, exc)
 
         # winsdk 0.10.0 — add_frame_arrived returns an EventRegistrationToken (int)
         token = self._frame_pool.add_frame_arrived(_on_frame_arrived)
@@ -509,7 +524,10 @@ class ScreenCapture:
         except asyncio.TimeoutError:
             log.warning("WinRT frame_arrived timed out for HWND=0x%X", self._hwnd)
             raw_frame = None
+        except asyncio.CancelledError:
+            return None
         finally:
+            self._active_future = None
             # winsdk 0.10.0 — remove_frame_arrived(token) deregisters the handler
             try:
                 self._frame_pool.remove_frame_arrived(token)
@@ -617,9 +635,15 @@ class ScreenCapture:
 
         # Frame diff — mirrors the pattern from instructions.md / capture_pipeline.js
         new_hash = hashlib.md5(target.tobytes()).hexdigest()
-        if new_hash == self.last_frame_hash:
-            return None   # identical region — skip
-        self.last_frame_hash = new_hash
+        
+        if full:
+            if new_hash == self._last_full_hash:
+                return None  # identical region — skip
+            self._last_full_hash = new_hash
+        else:
+            if new_hash == self._last_crop_hash:
+                return None  # identical region — skip
+            self._last_crop_hash = new_hash
 
         return target
 
@@ -629,6 +653,17 @@ class ScreenCapture:
 
     def _release_winrt(self) -> None:
         """Close all WinRT COM objects in the correct order."""
+        self._stopped = True
+
+        # Cancel active future if present
+        fut = self._active_future
+        self._active_future = None
+        if fut is not None and not fut.done():
+            try:
+                fut.cancel()
+            except Exception:
+                pass
+
         # winsdk 0.10.0 — close() on GraphicsCaptureSession stops frame delivery
         for attr in ("_session", "_frame_pool", "_item", "_d3d_device"):
             obj = getattr(self, attr, None)

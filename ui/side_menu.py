@@ -29,7 +29,6 @@ class SideMenu(QWidget):
     translation_enabled_changed  = pyqtSignal(bool)
     translation_backend_changed  = pyqtSignal(str)  # "auto" | "deepl" | "libre"
     auto_translate_selection_changed = pyqtSignal(bool)
-    libre_url_changed            = pyqtSignal(str)
     openai_validator_enabled_changed = pyqtSignal(bool)
     openai_api_key_changed       = pyqtSignal(str)
     openai_model_changed         = pyqtSignal(str)
@@ -242,17 +241,6 @@ class SideMenu(QWidget):
             self._backend_btns[bid] = btn
         self._backend_btns["auto"].setChecked(True)
         translation_layout.addLayout(backend_row)
-
-        self._libre_url_label = self._create_section_header("LibreTranslate URL")
-        self._libre_url_label.hide()
-        translation_layout.addWidget(self._libre_url_label)
-        self._libre_url_edit = QLineEdit("http://localhost:5000")
-        self._libre_url_edit.hide()
-        self._libre_url_edit.setPlaceholderText("http://localhost:5000")
-        self._libre_url_edit.editingFinished.connect(
-            lambda: self.libre_url_changed.emit(self._libre_url_edit.text().strip())
-        )
-        translation_layout.addWidget(self._libre_url_edit)
 
         # AI Enhancements
         self._ai_toggle_btn, ai_layout = self._create_collapsible_group(
@@ -983,10 +971,6 @@ class SideMenu(QWidget):
         """Update backend button selection and show/hide URL field."""
         for bid, btn in self._backend_btns.items():
             btn.setChecked(bid == backend_id)
-        # LibreTranslate is hidden for now, so URL field is always hidden
-        url_visible = False
-        self._libre_url_label.setVisible(url_visible)
-        self._libre_url_edit.setVisible(url_visible)
         self.translation_backend_changed.emit(backend_id)
 
     def update_openai_usage(self, chars: int) -> None:

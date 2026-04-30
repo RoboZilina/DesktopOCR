@@ -26,31 +26,24 @@ DEFAULT_REGION = (0, 540, 1280, 180)
 DEFAULT_SETTINGS = {
     "ocr_engine": "server",
     "paddle_line_count": 3,
-    "preprocessing_enabled": False,
     "auto_capture": True,
     "auto_copy": True,
     "auto_read_selection": False,
     "auto_translate_selection": False,
     "highlight_rare_words": False,
-    "upscale_factor": 2.0,
     "history_visible": True,
     "text_size": "medium",
     "tray_height": "medium",
     "theme": "auto",
-    "tts_enabled": False,
     "preview_visible": True,
     "ocr_canvas_visible": False,
     "vn_cleaner": True,
     "diff_threshold": 8.0,
     "dictionary_pass_enabled": True,
     "kanji_pass_enabled": False,
-    "confidence_threshold": 0.75,
-    "poll_interval_ms": 500,
-    "stabilize_wait_ms": 800,
     # Translation settings
     "translation_enabled": True,
     "translation_backend": "auto",  # "auto" | "deepl" | "google"
-    "libre_translate_url": "http://localhost:5000",
     # OpenAI settings
     "openai_validator_enabled": False,
     "openai_api_key": "",
@@ -92,12 +85,8 @@ def save_settings(settings: dict) -> None:
         logging.getLogger(__name__).warning("Failed to save settings: %s", exc)
 
 def _compute_diff(frame: np.ndarray, ref: np.ndarray | None) -> float:
-    """Return mean absolute pixel difference between two BGR frames."""
-    if ref is None or frame.shape != ref.shape:
-        return 999.0
-    gray1 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray2 = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY)
-    return float(np.mean(np.abs(gray1.astype(np.int16) - gray2.astype(np.int16))))
+    # Removed per C-1: Unify diff logic
+    pass
 
 
 def _manual_crop(frame: np.ndarray, region: tuple[int, int, int, int]) -> np.ndarray:
@@ -184,30 +173,36 @@ def list_windows():
 async def main(hwnd, gui_mode=True, window=None, window_title=""):
     args = parse_args()
 
-    engine_manager = EngineManager("models/paddle", {"det": "", "rec": "", "dict": ""})
+    MODEL_CONFIG = {
+        "det": args.det_model,
+        "rec": args.rec_model,
+        "dict": args.dict_file,
+    }
+    MODELS_DIR = args.models_dir
 
-    if args.list_engines:
-        print("Available engines:")
-        for engine_id in engine_manager.get_supported_engines():
-            print(f"- {engine_id}")
-        return
-
-    if args.list_engine_status:
-        print("Engine status:")
-        statuses = engine_manager.get_engine_status()
-        for engine_id in engine_manager.get_supported_engines():
-            info = statuses.get(engine_id, {})
-            state = info.get("state", "unknown")
-            dependency = info.get("dependency")
-            note = info.get("note")
-            suffix_parts = []
-            if dependency:
-                suffix_parts.append(f"dependency={dependency}")
-            if note:
-                suffix_parts.append(f"note={note}")
-            suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
-            print(f"- {engine_id}: state={state}{suffix}")
-        return
+    if args.list_engines or args.list_engine_status:
+        engine_manager = EngineManager(MODELS_DIR, MODEL_CONFIG)
+        if args.list_engines:
+            print("Available engines:")
+            for engine_id in engine_manager.get_supported_engines():
+                print(f"- {engine_id}")
+            return
+        if args.list_engine_status:
+            print("Engine status:")
+            statuses = engine_manager.get_engine_status()
+            for engine_id in engine_manager.get_supported_engines():
+                info = statuses.get(engine_id, {})
+                state = info.get("state", "unknown")
+                dependency = info.get("dependency")
+                note = info.get("note")
+                suffix_parts = []
+                if dependency:
+                    suffix_parts.append(f"dependency={dependency}")
+                if note:
+                    suffix_parts.append(f"note={note}")
+                suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
+                print(f"- {engine_id}: state={state}{suffix}")
+            return
 
     if args.raw_ocr:
         os.environ["DESKTOCR_RAW_OCR_MODE"] = "1"
@@ -234,12 +229,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
     list_windows()
 
-    MODEL_CONFIG = {
-        "det": args.det_model,
-        "rec": args.rec_model,
-        "dict": args.dict_file,
-    }
-    MODELS_DIR = args.models_dir
+    # MODEL_CONFIG and MODELS_DIR are already set up early.
 
     logger.info(
         "Model config | dir=%s | det=%s | rec=%s | dict=%s",
@@ -306,29 +296,23 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         if gui_mode and window is not None:
             window.set_status(status_text, summary_text)
 
-    openai_validator = OpenAIValidator(
-        api_key=settings_state.get("openai_api_key", ""),
-        model=settings_state.get("openai_model", "gpt-4o-mini")
-    )
+    # Validators must be constructed empty and configured exclusively via update_settings()
+    # to ensure startup restore, reset, and UI toggles all follow the same code path.
+    openai_validator = OpenAIValidator("")
     openai_validator.update_settings(
         api_key=settings_state.get("openai_api_key", ""),
-        enabled=settings_state.get("openai_validator_enabled", False)
+        enabled=settings_state.get("openai_validator_enabled", False),
+        model=settings_state.get("openai_model", "gpt-4o-mini"),
     )
 
-    deepseek_validator = DeepSeekValidator(
-        api_key=settings_state.get("deepseek_api_key", ""),
-        model=settings_state.get("deepseek_model", "deepseek-chat"),
-        enabled=settings_state.get("deepseek_validator_enabled", False),
-    )
+    deepseek_validator = DeepSeekValidator()
     deepseek_validator.update_settings(
         api_key=settings_state.get("deepseek_api_key", ""),
         enabled=settings_state.get("deepseek_validator_enabled", False),
+        model=settings_state.get("deepseek_model", "deepseek-chat"),
     )
 
-    google_vision = GoogleVisionOCR(
-        api_key=settings_state.get("google_vision_api_key", ""),
-        enabled=settings_state.get("google_vision_enabled", False),
-    )
+    google_vision = GoogleVisionOCR()
     google_vision.update_settings(
         api_key=settings_state.get("google_vision_api_key", ""),
         enabled=settings_state.get("google_vision_enabled", False),
@@ -616,12 +600,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 _do_save()
             window.side_menu.translation_backend_changed.connect(_on_translation_backend_changed)
 
-            def _on_libre_url_changed(url: str):
-                settings_state["libre_translate_url"] = url or "http://localhost:5000"
-                window._on_libre_url_changed(url)
-                _do_save()
-            window.side_menu.libre_url_changed.connect(_on_libre_url_changed)
-
             def _on_vn_cleaner_changed(enabled: bool):
                 settings_state["vn_cleaner"] = enabled
                 if enabled:
@@ -817,9 +795,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window._on_translation_backend_changed(
                 settings_state.get("translation_backend", "auto")
             )
-            window._on_libre_url_changed(
-                settings_state.get("libre_translate_url", "http://localhost:5000")
-            )
             if hasattr(window.side_menu, "set_vn_cleaner"):
                 window.side_menu.set_vn_cleaner(
                     settings_state.get("vn_cleaner", True), emit_signal=False
@@ -997,14 +972,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     if full_frame is not None:
                         window.set_preview_frame(full_frame)
                         if settings_state["auto_capture"] and selection_ready:
-                            region = capture.region or (0, 0, full_frame.shape[1], full_frame.shape[0])
-                            crop_frame = _manual_crop(full_frame, region)
-                            diff = _compute_diff(crop_frame, ref_frame)
-                            if diff > settings_state["diff_threshold"]:
-                                ref_frame = crop_frame.copy()
-                                if _stabilize_task and not _stabilize_task.done():
-                                    _stabilize_task.cancel()
-                                _stabilize_task = asyncio.ensure_future(_trigger_after_stabilize())
+                            frame = await capture.get_frame()
+                            if frame is None:
+                                await asyncio.sleep(PREVIEW_INTERVAL)
+                                continue
+                            if _stabilize_task and not _stabilize_task.done():
+                                _stabilize_task.cancel()
+                            _stabilize_task = asyncio.ensure_future(_trigger_after_stabilize())
                     await asyncio.sleep(PREVIEW_INTERVAL)
 
             async def _ocr_task():

@@ -9,8 +9,11 @@ import numpy as np
 # calls. If we ever introduce true parallel Paddle passes, switch to per-call
 # allocations (or guard the buffers with explicit synchronization).
 DET_LIMIT_SIDE_LEN = int(os.getenv("DESKTOCR_DET_LIMIT_SIDE_LEN", "1024"))
+import threading
+
 DET_BUFFER = None
 DET_BUFFER_SHAPE: tuple[int, int, int, int] | None = None
+_det_buffer_lock = threading.Lock()
 REC_BUFFER = np.zeros((1, 3, 48, 320), dtype=np.float32)
 
 # Detection box padding (applied in detection-space BEFORE scaling to original coords)
@@ -109,10 +112,11 @@ def preprocess_natural_slice(image: np.ndarray) -> np.ndarray:
 def _ensure_det_buffer(height: int, width: int) -> np.ndarray:
     global DET_BUFFER, DET_BUFFER_SHAPE
     shape = (1, 3, height, width)
-    if DET_BUFFER is None or DET_BUFFER_SHAPE != shape:
-        DET_BUFFER = np.zeros(shape, dtype=np.float32)
-        DET_BUFFER_SHAPE = shape
-    return DET_BUFFER
+    with _det_buffer_lock:
+        if DET_BUFFER is None or DET_BUFFER_SHAPE != shape:
+            DET_BUFFER = np.zeros(shape, dtype=np.float32)
+            DET_BUFFER_SHAPE = shape
+        return DET_BUFFER
 
 
 def _round_to_multiple(value: float, divisor: int = 32) -> int:

@@ -1445,7 +1445,10 @@ class EngineManager:
         final_text = "\n".join(texts) if texts else ""
         self._dbg(f"[Final] {final_text}")
         logger.debug(f"[PaddleDebug] Final merged text:\n{final_text}")
-        avg_conf = float(sum(confidences) / len(confidences)) if confidences else 0.0
+        weights = [max(len(t), 1) for t in texts]
+        weighted_sum = sum(c * w for c, w in zip(confidences, weights))
+        total_weight = sum(weights)
+        avg_conf = weighted_sum / total_weight if total_weight > 0 else 0.0
         return {"text": final_text, "confidence": avg_conf}, rec_stats
 
     def _normalize_crop(self, image: np.ndarray, box: list[int], w: int, h: int) -> tuple[list[int], dict]:

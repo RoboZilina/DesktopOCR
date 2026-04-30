@@ -158,9 +158,7 @@ class MainWindow(QMainWindow):
         self.side_menu.translation_backend_changed.connect(
             self._on_translation_backend_changed
         )
-        self.side_menu.libre_url_changed.connect(
-            self._on_libre_url_changed
-        )
+
         self.side_menu.auto_read_selection_changed.connect(
             self._on_auto_read_selection_changed
         )
@@ -475,7 +473,7 @@ class MainWindow(QMainWindow):
         """Store new URL and rebuild manager if libre is involved."""
         self._libre_url = url or "http://localhost:5000"
         backend_id = getattr(self, '_translation_backend', 'auto')
-        if backend_id in ("auto", "libre"):
+        if backend_id == "auto":
             self._rebuild_translation_manager()
 
     def _on_auto_read_selection_changed(self, enabled: bool) -> None:
