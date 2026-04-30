@@ -55,9 +55,11 @@ def pad_left(image: np.ndarray, px: int = 8) -> np.ndarray:
     h, w = image.shape[:2]
     if image.ndim == 2:
         out = np.zeros((h, w + px), dtype=image.dtype)
+        out[:, px:] = image
     else:
-        out = np.zeros((h, w + px, image.shape[2]), dtype=image.dtype)
-    out[..., px:] = image
+        c = image.shape[2]
+        out = np.zeros((h, w + px, c), dtype=image.dtype)
+        out[:, px:, :] = image
     return out
 
 
