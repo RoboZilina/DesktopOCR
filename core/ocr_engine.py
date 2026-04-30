@@ -12,31 +12,17 @@ import onnxruntime as ort
 
 import cv2
 
-
-
 from core.tensor_utils import (
-
     image_to_det_tensor,
-
     image_to_rec_tensor,
-
     PAD_LEFT,
-
     PAD_RIGHT,
-
     PAD_TOP,
-
     PAD_BOTTOM,
-
     filter_noise_boxes,
-
 )
 
-
-
 logger = logging.getLogger(__name__)
-
-
 
 _VN_STABLE_MODE = os.getenv("DESKTOCR_VN_STABLE_MODE", "1") == "1"
 DET_THRESHOLD_BASE = max(0.10, float(os.getenv("DESKTOCR_DET_THRESHOLD", "0.15")))
@@ -56,15 +42,9 @@ DET_UNCLIP_RATIO = min(3.0, max(1.0, float(os.getenv("DESKTOCR_DET_UNCLIP_RATIO"
 DET_SCORE_MODE = os.getenv("DESKTOCR_DET_SCORE_MODE", "slow").strip().lower()
 DET_MIN_BOX_AREA = 40 * 40
 
-
-
-
-
 def _det_no_pad_enabled() -> bool:
 
     return os.getenv("DESKTOCR_DET_NO_PAD", "0") == "1"
-
-
 
 class PaddleOCR:
 
@@ -78,15 +58,11 @@ class PaddleOCR:
 
         self.rec_providers = ["CPUExecutionProvider", "DmlExecutionProvider"]
 
-
-
         self.det_session = None
 
         self.rec_session = None
 
         self.dict = []
-
-
 
         self._load_lock = asyncio.Lock()
 
@@ -94,15 +70,11 @@ class PaddleOCR:
 
         self._warmed_up = False
 
-
-
     async def load(self):
 
         if self.det_session is not None and self.rec_session is not None:
 
             return self
-
-
 
         async with self._load_lock:
 
@@ -111,8 +83,6 @@ class PaddleOCR:
             if self.det_session is not None and self.rec_session is not None:
 
                 return self
-
-
 
             try:
 
@@ -130,11 +100,7 @@ class PaddleOCR:
 
                         self.dict.pop()
 
-
-
                 loop = asyncio.get_running_loop()
-
-
 
                 det_path = str(self.models_dir / self.model_config["det"])
 
@@ -150,8 +116,6 @@ class PaddleOCR:
 
                 )
 
-
-
                 rec_path = str(self.models_dir / self.model_config["rec"])
 
                 logger.info(f"Initializing recognition session with {rec_path}...")
@@ -161,8 +125,6 @@ class PaddleOCR:
                     None, lambda: ort.InferenceSession(rec_path, providers=self.rec_providers)
 
                 )
-
-
 
                 logger.info("Warming up models...")
 
@@ -178,11 +140,7 @@ class PaddleOCR:
 
                 raise
 
-
-
         return self
-
-
 
     async def warm_up(self):
 
@@ -194,13 +152,9 @@ class PaddleOCR:
 
         self._warmed_up = True
 
-
-
         if self.det_session is None or self.rec_session is None:
 
             return
-
-
 
         try:
 
@@ -208,11 +162,7 @@ class PaddleOCR:
 
             await asyncio.sleep(0)
 
-
-
             loop = asyncio.get_running_loop()
-
-
 
             # Warm up detection
 
@@ -224,8 +174,6 @@ class PaddleOCR:
 
             await loop.run_in_executor(None, self.det_session.run, None, {det_input_name: det_dummy})
 
-
-
             # Warm up recognition
 
             rec_shape = (1, 3, 48, 320)
@@ -236,15 +184,11 @@ class PaddleOCR:
 
             await loop.run_in_executor(None, self.rec_session.run, None, {rec_input_name: rec_dummy})
 
-
-
             logger.info("PaddleOCR warm-up complete")
 
         except Exception as e:
 
             logger.warning(f"PaddleOCR warm-up skipped (fallback or error): {e}")
-
-
 
     async def detect(self, image: np.ndarray) -> list:
 
@@ -252,27 +196,19 @@ class PaddleOCR:
 
             return []
 
-
-
         try:
 
             h_orig, w_orig = image.shape[:2]
 
-
-
             tensor_data, det_h, det_w = image_to_det_tensor(image)
 
             input_name = self.det_session.get_inputs()[0].name
-
-
 
             loop = asyncio.get_running_loop()
 
             outputs = await loop.run_in_executor(None, self.det_session.run, None, {input_name: tensor_data})
 
             output_map = outputs[0]
-
-
 
             # Output dims mapping depending on batch size
 
@@ -288,11 +224,7 @@ class PaddleOCR:
 
                 map_2d = output_map
 
-
-
             map_h, map_w = map_2d.shape
-
-
 
             threshold = DET_THRESHOLD_BASE
 
@@ -300,11 +232,7 @@ class PaddleOCR:
 
             num_labels, labels, stats, _centroids = cv2.connectedComponentsWithStats(binary_map, connectivity=8)
 
-
-
             boxes = []
-
-
 
             map_to_input_x = float(det_w) / float(map_w) if map_w > 0 else 1.0
 
@@ -313,8 +241,6 @@ class PaddleOCR:
             input_to_orig_x = float(w_orig) / float(det_w) if det_w > 0 else 1.0
 
             input_to_orig_y = float(h_orig) / float(det_h) if det_h > 0 else 1.0
-
-
 
             # Skip label 0 which is background
 
@@ -328,8 +254,6 @@ class PaddleOCR:
 
                 h = stats[label, cv2.CC_STAT_HEIGHT]
 
-
-
                 min_x = x
 
                 min_y = y
@@ -337,8 +261,6 @@ class PaddleOCR:
                 max_x = x + w - 1
 
                 max_y = y + h - 1
-
-
 
                 if _det_no_pad_enabled():
 
@@ -360,8 +282,6 @@ class PaddleOCR:
 
                     pad_bottom = PAD_BOTTOM
 
-
-
                 p_min_x = max(0.0, float(min_x - pad_left))
 
                 p_min_y = max(0.0, float(min_y - pad_top))
@@ -369,8 +289,6 @@ class PaddleOCR:
                 p_max_x = min(float(map_w), float(max_x + pad_right + 1))
 
                 p_max_y = min(float(map_h), float(max_y + pad_bottom + 1))
-
-
 
                 # Component score (keep faint strokes when score_mode == "slow")
 
@@ -390,8 +308,6 @@ class PaddleOCR:
 
                     continue
 
-
-
                 box_w = p_max_x - p_min_x
 
                 box_h = p_max_y - p_min_y
@@ -410,8 +326,6 @@ class PaddleOCR:
 
                     p_max_y = min(float(map_h), p_max_y + grow_y)
 
-
-
                 x1 = p_min_x * map_to_input_x * input_to_orig_x
 
                 y1 = p_min_y * map_to_input_y * input_to_orig_y
@@ -419,8 +333,6 @@ class PaddleOCR:
                 x2 = p_max_x * map_to_input_x * input_to_orig_x
 
                 y2 = p_max_y * map_to_input_y * input_to_orig_y
-
-
 
                 # Clamp remapped coordinates to original image bounds
 
@@ -432,11 +344,7 @@ class PaddleOCR:
 
                 y2 = max(0.0, min(float(h_orig), y2))
 
-
-
                 boxes.append([x1, y1, x2, y2, score])
-
-
 
             filtered_boxes = filter_noise_boxes(boxes, min_area=DET_MIN_BOX_AREA)
 
@@ -448,15 +356,11 @@ class PaddleOCR:
 
             return []
 
-
-
     async def recognize(self, crop: np.ndarray) -> dict:
 
         if self.rec_session is None:
 
             return {"text": "", "confidence": 0.0}
-
-
 
         async with self._busy_lock:
 
@@ -464,15 +368,11 @@ class PaddleOCR:
 
                 tensor_data = image_to_rec_tensor(crop)
 
-
-
                 input_name = self.rec_session.get_inputs()[0].name
 
                 loop = asyncio.get_running_loop()
 
                 outputs = await loop.run_in_executor(None, self.rec_session.run, None, {input_name: tensor_data})
-
-
 
                 logits = outputs[0]
                 dims = logits.shape
@@ -493,8 +393,6 @@ class PaddleOCR:
 
                     return {"text": "", "confidence": 0.0}
 
-
-
                 raw = self._ctc_greedy_decode(logits, [batch, time_steps, num_classes])
                 if not isinstance(raw, dict):
                     raw = {}
@@ -509,8 +407,6 @@ class PaddleOCR:
 
                 return {"text": "", "confidence": 0.0}
 
-
-
     def _ctc_greedy_decode(self, logits: np.ndarray, dims: list) -> dict:
 
         try:
@@ -521,8 +417,6 @@ class PaddleOCR:
 
             avg_confidences = []
 
-
-
             for b in range(batch):
 
                 prev = -1
@@ -532,8 +426,6 @@ class PaddleOCR:
                 max_probs = []
 
                 char_probs = []
-
-
 
                 for t in range(time_steps):
 
@@ -551,8 +443,6 @@ class PaddleOCR:
 
                     max_probs.append(max_val)
 
-
-
                     if max_idx != 0 and max_idx != prev:
 
                         dict_idx = max_idx - 1
@@ -563,11 +453,7 @@ class PaddleOCR:
 
                             char_probs.append(max_val)
 
-
-
                     prev = max_idx
-
-
 
                 texts.append("".join(chars))
 
@@ -590,8 +476,6 @@ class PaddleOCR:
 
                 avg_confidences.append(conf)
 
-
-
             return {"text": texts[0] if texts else "", "confidence": avg_confidences[0] if avg_confidences else 0.0}
 
         except Exception as e:
@@ -599,8 +483,6 @@ class PaddleOCR:
             logger.error(f"PaddleOCR CTC Decoding Error: {e}")
 
             return {"text": "", "confidence": 0.0}
-
-
 
     async def dispose(self):
 

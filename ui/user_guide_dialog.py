@@ -37,6 +37,8 @@ class UserGuideDialog(QDialog):
         else:
             path = pathlib.Path("docs/user_guide.html")
 
+        if not path.exists():
+            return ""  # silently ignore
         try:
             return path.read_text(encoding="utf-8")
         except Exception:

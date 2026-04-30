@@ -1,5 +1,4 @@
 import asyncio
-import difflib
 import logging
 from typing import Optional
 
@@ -40,8 +39,7 @@ class CapturePipeline:
         self.is_processing = False
         self._last_result = ""
         self._lock = asyncio.Lock()
-        
-        self._auto_task = None
+
         self._line_count: int = 3
         self._stats = {
             "frames": 0,
@@ -204,52 +202,6 @@ class CapturePipeline:
         except Exception as exc:  # noqa: BLE001
             logger.error("Google Vision OCR processing failed: %s", exc)
             return None
-
-    async def run_auto(self, callback, interval_ms=500, stabilize_ms=800):
-        """
-        Auto-capture loop. Polls capture_once and triggers a callback upon successful stabilization.
-        """
-        self._auto_task = asyncio.current_task()
-        interval = interval_ms / 1000.0
-        stabilize = stabilize_ms / 1000.0
-        
-        try:
-            while True:
-                await asyncio.sleep(interval)
-                
-                res = await self.capture_once(line_count=self._line_count)
-                if res is not None:
-                    result_gen = self.capture_generation
-                    # New valid result detected: wait for stabilization
-                    await asyncio.sleep(stabilize)
-                    # Only fire if no new capture happened during stabilization
-                    if self.capture_generation == result_gen:
-                        callback(res)
-                    
-        except asyncio.CancelledError:
-            logger.info("Auto-capture loop cancelled.")
-            pass
-
-    def stop_auto(self):
-        """
-        Cancels the active auto-capture loop and resets states.
-        """
-        if self._auto_task:
-            self._auto_task.cancel()
-            self._auto_task = None
-            
-        self.is_processing = False
-
-    def _is_near_duplicate(self, current: str, previous: str) -> bool:
-        if not current or not previous:
-            return False
-
-        if current in previous or previous in current:
-            if abs(len(current) - len(previous)) <= 2:
-                return True
-
-        ratio = difflib.SequenceMatcher(a=current, b=previous).ratio()
-        return ratio >= 0.90
 
     def _update_stats(self, meta: dict) -> None:
         self._stats["frames"] += 1

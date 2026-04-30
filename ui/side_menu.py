@@ -55,6 +55,7 @@ class SideMenu(QWidget):
         self._google_vision_toggle: tuple[QPushButton, QPushButton] | None = None
         self._capture_preview_toggle: tuple[QPushButton, QPushButton] | None = None
         self._ocr_canvas_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._vn_cleaner_toggle: tuple[QPushButton, QPushButton] | None = None
 
         # Outer layout: just holds the scroll area
         outer = QVBoxLayout(self)
@@ -116,9 +117,9 @@ class SideMenu(QWidget):
             self.auto_read_selection_changed,
             default=False,
         )
-        self._add_toggle_section(layout, "History Panel",
+        self._history_toggle = self._add_toggle_section(layout, "History Panel",
                                  self.history_visible_changed, default=True)
-        self._add_toggle_section(layout, "VN Text Cleaner",
+        self._vn_cleaner_toggle = self._add_toggle_section(layout, "VN Text Cleaner",
                                  self.vn_cleaner_changed, default=True)
 
         # Text size preset (font)
@@ -807,6 +808,11 @@ class SideMenu(QWidget):
         v.addWidget(btn)
         dlg.exec()
 
+    def set_history_visible(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._history_toggle, enabled)
+        if emit_signal:
+            self.history_visible_changed.emit(enabled)
+
     def set_auto_capture(self, enabled: bool, *, emit_signal: bool = False) -> None:
         self._set_toggle_state(self._auto_capture_toggle, enabled)
         if emit_signal:
@@ -835,6 +841,26 @@ class SideMenu(QWidget):
         self._set_toggle_state(self._translation_enabled_toggle, enabled)
         if emit_signal:
             self.translation_enabled_changed.emit(enabled)
+
+    def set_vn_cleaner(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._vn_cleaner_toggle, enabled)
+        if emit_signal:
+            self.vn_cleaner_changed.emit(enabled)
+
+    def set_diff_threshold(self, value: float, *, emit_signal: bool = False) -> None:
+        if not hasattr(self, "_threshold_slider") or not hasattr(self, "_threshold_label"):
+            return
+
+        old_block = self._threshold_slider.blockSignals(True)
+        try:
+            int_value = int(round(value))
+            self._threshold_slider.setValue(int_value)
+            self._threshold_label.setText(str(int_value))
+        finally:
+            self._threshold_slider.blockSignals(old_block)
+
+        if emit_signal:
+            self.diff_threshold_changed.emit(float(int_value))
 
     def set_highlight_rare_words(self, enabled: bool, *, emit_signal: bool = False) -> None:
         if hasattr(self, "_text_highlights_btn"):

@@ -49,7 +49,7 @@ DEFAULT_SETTINGS = {
     "stabilize_wait_ms": 800,
     # Translation settings
     "translation_enabled": True,
-    "translation_backend": "auto",  # "auto" | "deepl" | "libre"
+    "translation_backend": "auto",  # "auto" | "deepl" | "google"
     "libre_translate_url": "http://localhost:5000",
     # OpenAI settings
     "openai_validator_enabled": False,
@@ -64,7 +64,7 @@ DEFAULT_SETTINGS = {
     "google_vision_api_key": "",
 }
 
-SETTINGS_PATH = pathlib.Path("settings.json")
+SETTINGS_PATH = pathlib.Path(__file__).parent / "settings.json"
 
 
 def load_settings() -> dict:
@@ -78,12 +78,16 @@ def load_settings() -> dict:
                         settings[key] = raw[key]
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning("Failed to load settings: %s", exc)
+    if settings.get("text_size") not in ("small", "medium", "large"):
+        settings["text_size"] = "medium"
     return settings
 
 
 def save_settings(settings: dict) -> None:
     try:
-        SETTINGS_PATH.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        tmp = SETTINGS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+        tmp.replace(SETTINGS_PATH)
     except Exception as exc:  # noqa: BLE001
         logging.getLogger(__name__).warning("Failed to save settings: %s", exc)
 
@@ -567,7 +571,10 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 _do_save()
             window.side_menu.auto_read_selection_changed.connect(_on_auto_read_selection_changed)
 
-            window.side_menu.history_visible_changed.connect(window.history_sidebar.setVisible)
+            def _on_history_visible_changed(visible: bool):
+                settings_state["history_visible"] = visible
+                _do_save()
+            window.side_menu.history_visible_changed.connect(_on_history_visible_changed)
 
             def _on_preview_visible_changed(enabled: bool):
                 settings_state["preview_visible"] = enabled
@@ -620,7 +627,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 if enabled:
                     os.environ.pop("DESKTOCR_DISABLE_VALIDATOR", None)
                 else:
-                    os.environ.__setitem__("DESKTOCR_DISABLE_VALIDATOR", "1")
+                    os.environ["DESKTOCR_DISABLE_VALIDATOR"] = "1"
                 _do_save()
             window.side_menu.vn_cleaner_changed.connect(_on_vn_cleaner_changed)
 
@@ -769,6 +776,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state.get("google_vision_enabled", False), emit_signal=False
             )
             window.side_menu.set_google_vision_api_key(settings_state.get("google_vision_api_key", ""))
+            if hasattr(window.side_menu, "set_history_visible"):
+                window.side_menu.set_history_visible(
+                    settings_state.get("history_visible", True), emit_signal=False
+                )
+            window.history_sidebar.setVisible(
+                settings_state.get("history_visible", True)
+            )
             # Theme, text size, tray height
             if hasattr(window.side_menu, "set_theme_id"):
                 window.side_menu.set_theme_id(
@@ -781,6 +795,10 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             if hasattr(window.side_menu, "set_tray_height"):
                 window.side_menu.set_tray_height(
                     settings_state.get("tray_height", "medium"), emit_signal=False
+                )
+            if hasattr(window.side_menu, "set_diff_threshold"):
+                window.side_menu.set_diff_threshold(
+                    settings_state.get("diff_threshold", 8.0), emit_signal=False
                 )
             # Apply side effects that signal handlers normally perform
             window.preview_widget.setVisible(
@@ -802,6 +820,11 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window._on_libre_url_changed(
                 settings_state.get("libre_translate_url", "http://localhost:5000")
             )
+            if hasattr(window.side_menu, "set_vn_cleaner"):
+                window.side_menu.set_vn_cleaner(
+                    settings_state.get("vn_cleaner", True), emit_signal=False
+                )
+            _on_vn_cleaner_changed(settings_state.get("vn_cleaner", True))
             # Apply theme side effect
             theme_id = settings_state.get("theme", "auto")
             if theme_id != "auto":
@@ -815,47 +838,88 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             )
 
             # --- Reset ---
-            def _on_reset_requested():
+            def _apply_defaults_to_ui(window, *, emit_signals: bool) -> None:
+                # Read only from DEFAULT_SETTINGS
+                defaults = DEFAULT_SETTINGS
+                es = emit_signals
+
+                # Side menu toggles
+                window.side_menu.set_auto_capture(defaults.get("auto_capture", True), emit_signal=es)
+                window.side_menu.set_auto_copy(defaults.get("auto_copy", True), emit_signal=es)
+                if hasattr(window.side_menu, "set_auto_read_selection"):
+                    window.side_menu.set_auto_read_selection(defaults.get("auto_read_selection", False), emit_signal=es)
+                if hasattr(window.side_menu, "set_auto_translate_selection"):
+                    window.side_menu.set_auto_translate_selection(defaults.get("auto_translate_selection", False), emit_signal=es)
+
+                # Text highlights / passes
+                if hasattr(window.side_menu, "set_highlight_rare_words"):
+                    window.side_menu.set_highlight_rare_words(defaults.get("highlight_rare_words", False), emit_signal=es)
+                if hasattr(window.side_menu, "set_enable_dictionary_pass"):
+                    window.side_menu.set_enable_dictionary_pass(defaults.get("dictionary_pass_enabled", True), emit_signal=es)
+                if hasattr(window.side_menu, "set_enable_kanji_pass"):
+                    window.side_menu.set_enable_kanji_pass(defaults.get("kanji_pass_enabled", False), emit_signal=es)
+
+                # Translation
+                if hasattr(window.side_menu, "set_translation_enabled"):
+                    window.side_menu.set_translation_enabled(defaults.get("translation_enabled", False), emit_signal=es)
+                if hasattr(window.side_menu, "set_translation_backend"):
+                    window.side_menu.set_translation_backend(defaults.get("translation_backend", "auto"), emit_signal=es)
+
+                # Validators
+                window.side_menu.set_openai_validator_enabled(defaults.get("openai_validator_enabled", False), emit_signal=es)
+                window.side_menu.set_openai_api_key(defaults.get("openai_api_key", ""))
+                window.side_menu.set_openai_model(defaults.get("openai_model", "gpt-4o-mini"))
+                window.side_menu.set_deepseek_validator_enabled(defaults.get("deepseek_validator_enabled", False), emit_signal=es)
+                window.side_menu.set_deepseek_api_key(defaults.get("deepseek_api_key", ""))
+                window.side_menu.set_deepseek_model(defaults.get("deepseek_model", "deepseek-chat"))
+                window.side_menu.set_google_vision_enabled(defaults.get("google_vision_enabled", False), emit_signal=es)
+                window.side_menu.set_google_vision_api_key(defaults.get("google_vision_api_key", ""))
+
+                # VN cleaner
+                if hasattr(window.side_menu, "set_vn_cleaner"):
+                    window.side_menu.set_vn_cleaner(defaults.get("vn_cleaner", True), emit_signal=es)
+
+                # Visual toggles
+                if hasattr(window.side_menu, "set_preview_visible"):
+                    window.side_menu.set_preview_visible(defaults.get("preview_visible", True), emit_signal=es)
+                if hasattr(window.side_menu, "set_ocr_canvas_visible"):
+                    window.side_menu.set_ocr_canvas_visible(defaults.get("ocr_canvas_visible", False), emit_signal=es)
+                if hasattr(window.side_menu, "set_history_visible"):
+                    window.side_menu.set_history_visible(defaults.get("history_visible", True), emit_signal=es)
+
+                # Theme / text size / tray height
+                if hasattr(window.side_menu, "set_theme_id"):
+                    window.side_menu.set_theme_id(defaults.get("theme", "auto"), emit_signal=es)
+                if hasattr(window.side_menu, "set_text_size"):
+                    window.side_menu.set_text_size(defaults.get("text_size", "medium"), emit_signal=es)
+                if hasattr(window.side_menu, "set_tray_height"):
+                    window.side_menu.set_tray_height(defaults.get("tray_height", "medium"), emit_signal=es)
+
+                # Diff threshold
+                if hasattr(window.side_menu, "set_diff_threshold"):
+                    window.side_menu.set_diff_threshold(defaults.get("diff_threshold", 8.0), emit_signal=es)
+
+                # Apply non-side-menu visual state directly to widgets
+                window.preview_widget.setVisible(defaults.get("preview_visible", True))
+                window._on_ocr_canvas_visible_changed(defaults.get("ocr_canvas_visible", False))
+                window.history_sidebar.setVisible(defaults.get("history_visible", True))
+
+                # Apply theme side effect
+                window._apply_theme(defaults.get("theme", "auto"))
+
+                # Apply vn_cleaner env-var side effect
+                _on_vn_cleaner_changed(defaults.get("vn_cleaner", True))
+
+            def _on_reset_requested() -> None:
                 nonlocal _save_blocked
                 _save_blocked = True
-                # UI state (signals fire but saves are blocked)
-                window.side_menu.set_auto_capture(True, emit_signal=True)
-                window.side_menu.set_auto_copy(False, emit_signal=True)
-                window.side_menu.set_auto_read_selection(False, emit_signal=True)
-                window.side_menu.set_auto_translate_selection(False, emit_signal=True)
-                window.side_menu.set_highlight_rare_words(False, emit_signal=True)
-                window.side_menu.set_enable_dictionary_pass(True, emit_signal=True)
-                window.side_menu.set_enable_kanji_pass(False, emit_signal=True)
-                window.side_menu.set_preview_visible(True, emit_signal=True)
-                window.side_menu.set_ocr_canvas_visible(False, emit_signal=True)
-                window.side_menu.set_openai_validator_enabled(False, emit_signal=True)
-                window.side_menu.set_openai_api_key("")
-                window.side_menu.set_openai_model("gpt-4o-mini")
-                window.side_menu.set_deepseek_validator_enabled(False, emit_signal=True)
-                window.side_menu.set_deepseek_api_key("")
-                window.side_menu.set_deepseek_model("deepseek-chat")
-                window.side_menu.set_google_vision_enabled(False, emit_signal=True)
-                window.side_menu.set_google_vision_api_key("")
-                if hasattr(window.side_menu, "set_theme_id"):
-                    window.side_menu.set_theme_id("auto", emit_signal=True)
-                if hasattr(window.side_menu, "set_text_size"):
-                    window.side_menu.set_text_size("medium", emit_signal=True)
-                if hasattr(window.side_menu, "set_tray_height"):
-                    window.side_menu.set_tray_height("medium", emit_signal=True)
-                # Diff threshold
-                window.side_menu._threshold_slider.setValue(8)
-                window.side_menu._threshold_label.setText("8")
-                window.side_menu.diff_threshold_changed.emit(8.0)
-                # VN cleaner
-                window.side_menu.vn_cleaner_changed.emit(True)
-                # Translation
-                window.side_menu.translation_enabled_changed.emit(True)
-                if hasattr(window.side_menu, "set_translation_backend"):
-                    window.side_menu.set_translation_backend("auto", emit_signal=True)
-                elif hasattr(window.side_menu, "_on_translation_backend_clicked"):
-                    window.side_menu._on_translation_backend_clicked("auto")
-                # Save once
-                _save_blocked = False
+                try:
+                    # Apply defaults to UI and emit signals so handlers update settings_state
+                    _apply_defaults_to_ui(window, emit_signals=True)
+                finally:
+                    _save_blocked = False
+
+                # Persist the final state once
                 _do_save()
 
             window.side_menu.reset_requested.connect(_on_reset_requested)

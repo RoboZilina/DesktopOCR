@@ -434,8 +434,8 @@ class MainWindow(QMainWindow):
         """Dispose all backends in a translation manager."""
         if manager is None:
             return
-        backends = getattr(manager, "_backends", {})
-        for backend in backends.values() if isinstance(backends, dict) else []:
+        backends = getattr(manager, "_backends", [])
+        for backend in backends:
             if hasattr(backend, "dispose"):
                 try:
                     await backend.dispose()

@@ -117,6 +117,7 @@ MAX_FALLBACK_BANDS = 2
 MIN_FALLBACK_GAIN_JP_CHARS = 2
 MIN_FALLBACK_GAIN_TEXT_CHARS = 3
 
+# Note: _CROP_SAVE_COUNTER persists across the session to ensure unique filenames.
 _CROP_SAVE_COUNTER = 0
 
 
@@ -210,7 +211,11 @@ class EasyOCREngine:
         }
 
     async def dispose(self):
-        self._reader = None
+        if self._reader is not None:
+            del self._reader
+            self._reader = None
+            import gc
+            gc.collect()
 
 class EngineManager:
     def _dbg(self, msg, *args, **kwargs):
@@ -534,7 +539,8 @@ class EngineManager:
             return "", {"validator": {"enabled": not _validator_disabled(), "changed": False, "valid_hint": False, "jp_chars": 0}}
 
         if _validator_disabled():
-            return text, {"validator": {"enabled": False, "changed": False, "valid_hint": True, "jp_chars": int(score_japanese_density(text))}}
+            valid_hint = bool(is_valid_japanese(text, confidence)) if text else False
+            return text, {"validator": {"enabled": False, "changed": False, "valid_hint": valid_hint, "jp_chars": int(score_japanese_density(text))}}
 
         cleaned = clean_ocr_output_enhanced(text)
         out_text = cleaned if cleaned else text
@@ -1283,36 +1289,6 @@ class EngineManager:
         ink_ratio = ink_pixels / float(total_pixels)
         return float(math.log10(max(ink_ratio, 1e-6)))
 
-    def _merge_horizontal_boxes(self, boxes: list, y_tol: int) -> list[list[int]]:
-        if not boxes:
-            return []
-
-        sorted_boxes = sorted(boxes, key=lambda b: (float(b[1] + b[3]) * 0.5, float(b[0])))
-        groups: list[list[list[float]]] = []
-
-        for box in sorted_boxes:
-            cy = (float(box[1]) + float(box[3])) * 0.5
-            placed = False
-            for group in groups:
-                g_cy = sum((float(b[1]) + float(b[3])) * 0.5 for b in group) / len(group)
-                if abs(cy - g_cy) <= y_tol:
-                    group.append(box)
-                    placed = True
-                    break
-            if not placed:
-                groups.append([box])
-
-        merged: list[list[int]] = []
-        for group in groups:
-            x1 = min(float(b[0]) for b in group)
-            y1 = min(float(b[1]) for b in group)
-            x2 = max(float(b[2]) for b in group)
-            y2 = max(float(b[3]) for b in group)
-            merged.append([int(round(x1)), int(round(y1)), int(round(x2)), int(round(y2))])
-
-        merged.sort(key=lambda b: (b[1], b[0]))
-        return merged
-
     def _sort_paddle_boxes(self, boxes):
         """
         Sort simple rectangular boxes [x1, y1, x2, y2]
@@ -1332,8 +1308,8 @@ class EngineManager:
 
         logger.debug(f"[PaddleDebug] Raw boxes before sort: {boxes}")
         boxes = self._sort_paddle_boxes(boxes)
-        if len(boxes) > 16:
-            boxes = boxes[:16]
+        if len(boxes) > _PRUNE_MAX_FILTERED_BOXES:
+            boxes = boxes[:_PRUNE_MAX_FILTERED_BOXES]
             self._dbg(f"[RecognizeCap] limiting to {len(boxes)} boxes for recognition")
         self._dbg(f"[Recognize] Sorted boxes: {boxes}")
         logger.debug(f"[PaddleDebug] Boxes after sort: {boxes}")
@@ -1571,110 +1547,6 @@ class EngineManager:
         self._dbg(boost_msg)
 
         return boost_ready
-
-    def _should_trigger_fallback(self, primary: dict, merged_boxes: list[list[int]], frame_w: int) -> bool:
-        text = (primary.get("text", "") or "").strip()
-        jp_chars = score_japanese_density(text)
-
-        if not merged_boxes:
-            return True
-        if len(merged_boxes) > 8:
-            return True
-        if jp_chars < MIN_PRIMARY_JP_CHARS:
-            return True
-
-        widest = max((b[2] - b[0]) for b in merged_boxes)
-        if widest < int(frame_w * 0.35):
-            return True
-
-        for b in merged_boxes:
-            bw = b[2] - b[0]
-            bh = b[3] - b[1]
-            if bh <= 0:
-                continue
-            aspect = bw / bh
-            if aspect > 40.0 or aspect < 1.0:
-                return True
-
-        return False
-
-    def _extract_dynamic_bands(self, image: np.ndarray) -> list[tuple[int, int]]:
-        h, _w = image.shape[:2]
-        if h < 8:
-            return []
-
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        grad_x = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
-        energy = np.abs(grad_x).sum(axis=1)
-        energy = cv2.GaussianBlur(energy.reshape(-1, 1), (1, 9), 0).reshape(-1)
-
-        thresh = float(np.mean(energy) + 0.45 * np.std(energy))
-        active = energy > thresh
-
-        bands: list[tuple[int, int, float]] = []
-        start = None
-        for i, val in enumerate(active):
-            if val and start is None:
-                start = i
-            elif not val and start is not None:
-                end = i - 1
-                if (end - start + 1) >= 8:
-                    band_score = float(np.sum(energy[start:end + 1]))
-                    bands.append((start, end, band_score))
-                start = None
-        if start is not None:
-            end = len(active) - 1
-            if (end - start + 1) >= 8:
-                band_score = float(np.sum(energy[start:end + 1]))
-                bands.append((start, end, band_score))
-
-        if not bands:
-            return []
-
-        bands.sort(key=lambda x: x[2], reverse=True)
-        top = bands[:MAX_FALLBACK_BANDS]
-        top_sorted = sorted(top, key=lambda x: x[0])
-
-        out: list[tuple[int, int]] = []
-        for y1, y2, _score in top_sorted:
-            margin = 6
-            yy1 = max(0, y1 - margin)
-            yy2 = min(h, y2 + 1 + margin)
-            if yy2 - yy1 >= 8:
-                out.append((yy1, yy2))
-        return out
-
-    async def _recognize_dynamic_bands(self, image: np.ndarray) -> dict:
-        bands = self._extract_dynamic_bands(image)
-        if not bands:
-            return {"text": "", "confidence": 0.0}
-
-        texts: list[str] = []
-        confidences: list[float] = []
-        for y1, y2 in bands:
-            crop = image[y1:y2, :].copy()
-            bh, bw = crop.shape[:2]
-
-            band_detected = await self._current_instance.detect(crop)
-            band_boxes = self._filter_boxes(band_detected, bw, bh)
-            band_merged = self._merge_horizontal_boxes(band_boxes, y_tol=max(4, int(bh * 0.18)))
-            detected_res, _band_stats = await self._recognize_box_groups(crop, band_merged)
-
-            full_res = await self._current_instance.recognize(crop)
-            best_band = self._pick_best_candidate(
-                self._score_candidate(detected_res, source="band_detect"),
-                self._score_candidate(full_res, source="band_full"),
-            )
-            text = best_band.get("text", "").strip()
-            conf = float(best_band.get("confidence", 0.0) or 0.0)
-            if text:
-                logging.info(f"[PaddleDebug] Recognized: '{text}' conf={conf}")
-                texts.append(text)
-                confidences.append(conf)
-
-        final_text = "\n".join(texts)
-        avg_conf = float(sum(confidences) / len(confidences)) if confidences else 0.0
-        return {"text": final_text, "confidence": avg_conf}
 
     def _score_candidate(self, candidate: dict, source: str) -> dict:
         text = (candidate.get("text", "") or "").strip()
