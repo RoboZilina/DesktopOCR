@@ -79,6 +79,8 @@ class SideMenu(QWidget):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(4)
 
+        self._collapsible_panels: list[QFrame] = []
+
         # Header
         self._header = self._create_section_header("SIDE MENU")
         self._header.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -164,17 +166,26 @@ class SideMenu(QWidget):
             "Dictionary Pass",
             self.dictionary_pass_changed,
             default=True,
+            help_text=(
+                "Shows how common each word is. "
+                "Solid underline = very common, dotted = less common, none = rare/unknown. "
+                "Inflected forms inherit the base dictionary lemma."
+            ),
         )
         self._kanji_pass_toggle = self._add_toggle_section(
             th_layout,
             "Kanji Pass",
             self.kanji_pass_changed,
             default=False,
+            help_text=(
+                "Highlights individual kanji by category (Jōyō / Jinmeiyō). "
+                "This layer is additive and does not overwrite dictionary underlines."
+            ),
         )
 
         # --- Translation section ---
         self._translation_toggle_btn, translation_layout = self._create_collapsible_group(
-            "Translation Options", layout, default_open=True
+            "Translation Options", layout, default_open=False
         )
         translation_layout.addWidget(self._create_section_header("Translation"))
         self._add_toggle_section(
@@ -426,6 +437,12 @@ class SideMenu(QWidget):
             f"qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {bg}, stop:1 {border})"
             if is_dark else bg
         )
+        for p in getattr(self, "_collapsible_panels", []):
+            p.setStyleSheet(
+                f"QFrame {{ background: {btn_bg}; border: none; "
+                f"border-radius: 6px; margin-top: 2px; margin-bottom: 6px; }}"
+            )
+
         self.setStyleSheet(f"""
             #SideMenu {{
                 background: {panel_bg};
@@ -474,6 +491,24 @@ class SideMenu(QWidget):
             }}
             #SideMenu QPushButton:not([menuClass]):hover {{
                 border-color: {accent};
+            }}
+
+            #SideMenu QPushButton[menuClass="help-btn"] {{
+                background: transparent;
+                color: {text_dim};
+                border: 1px solid {btn_border};
+                border-radius: 10px;
+                padding: 0;
+                min-height: 20px;
+                max-width: 20px;
+                max-height: 20px;
+                font-size: 11px;
+                font-weight: 700;
+            }}
+            #SideMenu QPushButton[menuClass="help-btn"]:hover {{
+                background: {btn_hover_bg};
+                border-color: {accent};
+                color: {accent};
             }}
 
             #SideMenu QSlider::groove:horizontal {{
@@ -570,7 +605,10 @@ class SideMenu(QWidget):
         btn.setMaximumWidth(16777215)
         parent_layout.addWidget(btn)
 
-        panel = QWidget()
+        panel = QFrame()
+        panel.setFrameShape(QFrame.Shape.NoFrame)
+        panel.setAutoFillBackground(True)
+        self._collapsible_panels.append(panel)
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 4, 0, 0)
         panel_layout.setSpacing(6)
@@ -628,10 +666,27 @@ class SideMenu(QWidget):
         self.reset_requested.emit()
 
     def _add_toggle_section(self, layout, title: str,
-                           signal: pyqtSignal, default: bool):
+                           signal: pyqtSignal, default: bool,
+                           help_text: str | None = None):
         header = self._create_section_header(title)
         header.setContentsMargins(0, 4, 0, 2)
-        layout.addWidget(header)
+
+        if help_text:
+            header_row = QHBoxLayout()
+            header_row.setContentsMargins(0, 0, 0, 0)
+            header_row.setSpacing(4)
+            header_row.addWidget(header)
+            header_row.addStretch(1)
+            help_btn = QPushButton("?")
+            help_btn.setProperty("menuClass", "help-btn")
+            help_btn.setToolTip(help_text)
+            help_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            help_btn.setFixedSize(20, 20)
+            header_row.addWidget(help_btn, 0)
+            layout.addLayout(header_row)
+        else:
+            layout.addWidget(header)
+
         row = QHBoxLayout()
         row.setContentsMargins(0, 2, 0, 2)
         row.setSpacing(4)
@@ -664,6 +719,7 @@ class SideMenu(QWidget):
         off_btn.clicked.connect(_off_clicked)
         row.addWidget(on_btn, 1)
         row.addWidget(off_btn, 1)
+
         layout.addLayout(row)
         return on_btn, off_btn
 

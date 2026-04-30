@@ -138,6 +138,45 @@
   </div>
 
   <div class="section">
+    <h2>Highlighting Explained</h2>
+    <div class="grid">
+      <div class="card">
+        <span class="pill">Dictionary Underlines</span>
+        <p>
+          Shows how common each word is in everyday Japanese.
+        </p>
+        <ul>
+          <li><strong>Solid underline</strong> — very common word</li>
+          <li><strong>Dotted underline</strong> — less common word</li>
+          <li><strong>No underline</strong> — rare or unknown</li>
+        </ul>
+        <p>
+          Inflected forms automatically inherit the base dictionary lemma
+          (e.g., <code>行かない</code> → <code>行く</code>).
+        </p>
+      </div>
+      <div class="card">
+        <span class="pill">Kanji Backgrounds</span>
+        <p>
+          Highlights individual kanji by category.
+        </p>
+        <ul>
+          <li><strong>Jōyō kanji</strong> — taught in school, widely used</li>
+          <li><strong>Jinmeiyō kanji</strong> — used mainly in names</li>
+        </ul>
+        <p>
+          This layer is visual only and does not affect word frequency.
+        </p>
+      </div>
+    </div>
+    <p>
+      <strong>Combined Layers.</strong> Both passes can be enabled independently.
+      When both are active, underlines show word frequency and background
+      tints show kanji category. They never overwrite each other.
+    </p>
+  </div>
+
+  <div class="section">
     <h2>Widgets & Panels</h2>
     <ul>
       <li><strong>Preview Widget:</strong> Live frame with OCR boxes, capture guides, and status overlays.</li>
