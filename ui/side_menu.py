@@ -14,6 +14,9 @@ class SideMenu(QWidget):
     auto_capture_changed     = pyqtSignal(bool)
     auto_copy_changed        = pyqtSignal(bool)
     auto_read_selection_changed = pyqtSignal(bool)
+    highlight_rare_words_changed = pyqtSignal(bool)
+    dictionary_pass_changed  = pyqtSignal(bool)
+    kanji_pass_changed       = pyqtSignal(bool)
     history_visible_changed  = pyqtSignal(bool)
     preview_visible_changed  = pyqtSignal(bool)
     ocr_canvas_visible_changed = pyqtSignal(bool)
@@ -51,6 +54,7 @@ class SideMenu(QWidget):
         self._google_vision_toggle: tuple[QPushButton, QPushButton] | None = None
         self._capture_preview_toggle: tuple[QPushButton, QPushButton] | None = None
         self._ocr_canvas_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._rare_highlight_toggle: tuple[QPushButton, QPushButton] | None = None
 
         # Outer layout: just holds the scroll area
         outer = QVBoxLayout(self)
@@ -146,6 +150,26 @@ class SideMenu(QWidget):
             self._tray_size_btns[sid] = btn
         self._tray_size_btns["medium"].setChecked(True)
         layout.addLayout(tray_row)
+
+        layout.addWidget(self._create_section_header("Text Highlights"))
+        self._rare_highlight_toggle = self._add_toggle_section(
+            layout,
+            "Highlight Rare Words",
+            self.highlight_rare_words_changed,
+            default=False,
+        )
+        self._dictionary_pass_toggle = self._add_toggle_section(
+            layout,
+            "Dictionary Pass",
+            self.dictionary_pass_changed,
+            default=True,
+        )
+        self._kanji_pass_toggle = self._add_toggle_section(
+            layout,
+            "Kanji Pass",
+            self.kanji_pass_changed,
+            default=False,
+        )
 
         # --- Translation section ---
         self._translation_toggle_btn, translation_layout = self._create_collapsible_group(
@@ -407,7 +431,6 @@ class SideMenu(QWidget):
                 border-right: 1px solid {border};
             }}
 
-            /* Scope all descendants to beat the global * rule */
             #SideMenu QLabel {{
                 background: transparent;
                 color: {text_dim};
@@ -434,7 +457,7 @@ class SideMenu(QWidget):
                 color: #ffffff;
                 border-color: {accent};
             }}
-            #SideMenu QPushButton[menuClass="option-btn"]:hover:!checked {{
+            #SideMenu QPushButton[menuClass="option-btn"]:hover {{
                 border-color: {btn_hover_border};
                 background: {btn_hover_bg};
             }}
@@ -595,6 +618,9 @@ class SideMenu(QWidget):
         self.theme_changed.emit("auto")
         self.set_auto_read_selection(False)
         self.set_auto_translate_selection(False)
+        self.set_highlight_rare_words(False, emit_signal=True)
+        self.set_enable_dictionary_pass(True, emit_signal=True)
+        self.set_enable_kanji_pass(False, emit_signal=True)
         self.set_preview_visible(True, emit_signal=True)
         self._set_advanced_visible(False)
         self.set_ocr_canvas_visible(False, emit_signal=True)
@@ -660,6 +686,21 @@ class SideMenu(QWidget):
         self._set_toggle_state(self._auto_translate_toggle, enabled)
         if emit_signal:
             self.auto_translate_selection_changed.emit(enabled)
+
+    def set_highlight_rare_words(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._rare_highlight_toggle, enabled)
+        if emit_signal:
+            self.highlight_rare_words_changed.emit(enabled)
+
+    def set_enable_dictionary_pass(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._dictionary_pass_toggle, enabled)
+        if emit_signal:
+            self.dictionary_pass_changed.emit(enabled)
+
+    def set_enable_kanji_pass(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._kanji_pass_toggle, enabled)
+        if emit_signal:
+            self.kanji_pass_changed.emit(enabled)
 
     def set_openai_validator_enabled(self, enabled: bool, *, emit_signal: bool = False) -> None:
         self._set_toggle_state(self._openai_toggle, enabled)

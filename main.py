@@ -31,6 +31,7 @@ DEFAULT_SETTINGS = {
     "auto_copy": True,
     "auto_read_selection": False,
     "auto_translate_selection": False,
+    "highlight_rare_words": False,
     "upscale_factor": 2.0,
     "history_visible": True,
     "text_size": "standard",
@@ -551,15 +552,21 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.side_menu.auto_copy_changed.connect(
                 lambda v: settings.__setitem__("auto_copy", v)
             )
-            window.side_menu.auto_read_selection_changed.connect(
-                lambda v: settings_state.__setitem__("auto_read_selection", v)
-            )
+            def _on_auto_read_selection_changed(enabled: bool):
+                settings_state["auto_read_selection"] = enabled
+                save_settings(settings_state)
+
+            window.side_menu.auto_read_selection_changed.connect(_on_auto_read_selection_changed)
             window.side_menu.history_visible_changed.connect(window.history_sidebar.setVisible)
             window.side_menu.preview_visible_changed.connect(window.preview_widget.setVisible)
             window.side_menu.text_size_changed.connect(window.transcription_tray.set_text_size)
             window.side_menu.tray_height_changed.connect(window.transcription_tray.set_tray_height)
+            def _on_auto_translate_selection_changed(enabled: bool):
+                settings_state["auto_translate_selection"] = enabled
+                save_settings(settings_state)
+
             window.side_menu.auto_translate_selection_changed.connect(
-                lambda v: settings_state.__setitem__("auto_translate_selection", v)
+                _on_auto_translate_selection_changed
             )
             window.side_menu.vn_cleaner_changed.connect(
                 lambda v: (
@@ -570,7 +577,28 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.side_menu.diff_threshold_changed.connect(
                 lambda v: settings.__setitem__("diff_threshold", v)
             )
-            
+
+            def _on_highlight_rare_words_changed(enabled: bool):
+                settings_state["highlight_rare_words"] = enabled
+                window.transcription_tray.set_highlight_rare_words(enabled)
+                save_settings(settings_state)
+
+            window.side_menu.highlight_rare_words_changed.connect(_on_highlight_rare_words_changed)
+
+            def _on_dictionary_pass_changed(enabled: bool):
+                settings_state["dictionary_pass_enabled"] = enabled
+                window.transcription_tray.set_enable_dictionary_pass(enabled)
+                save_settings(settings_state)
+
+            window.side_menu.dictionary_pass_changed.connect(_on_dictionary_pass_changed)
+
+            def _on_kanji_pass_changed(enabled: bool):
+                settings_state["kanji_pass_enabled"] = enabled
+                window.transcription_tray.set_enable_kanji_pass(enabled)
+                save_settings(settings_state)
+
+            window.side_menu.kanji_pass_changed.connect(_on_kanji_pass_changed)
+
             # OpenAI Validator Settings
             def _on_openai_enabled_changed(enabled: bool):
                 settings_state["openai_validator_enabled"] = enabled
@@ -621,12 +649,33 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.side_menu.google_vision_enabled_changed.connect(_on_google_vision_enabled_changed)
             window.side_menu.google_vision_api_key_changed.connect(_on_google_vision_key_changed)
 
+            window.transcription_tray.set_highlight_rare_words(
+                settings_state.get("highlight_rare_words", False)
+            )
+            window.transcription_tray.set_enable_dictionary_pass(
+                settings_state.get("dictionary_pass_enabled", True)
+            )
+            window.transcription_tray.set_enable_kanji_pass(
+                settings_state.get("kanji_pass_enabled", False)
+            )
             window.side_menu.set_auto_read_selection(
                 settings_state.get("auto_read_selection", False),
                 emit_signal=True,
             )
             window.side_menu.set_auto_translate_selection(
                 settings_state.get("auto_translate_selection", False),
+                emit_signal=True,
+            )
+            window.side_menu.set_highlight_rare_words(
+                settings_state.get("highlight_rare_words", False),
+                emit_signal=True,
+            )
+            window.side_menu.set_enable_dictionary_pass(
+                settings_state.get("dictionary_pass_enabled", True),
+                emit_signal=True,
+            )
+            window.side_menu.set_enable_kanji_pass(
+                settings_state.get("kanji_pass_enabled", False),
                 emit_signal=True,
             )
             window.side_menu.set_openai_validator_enabled(
@@ -656,6 +705,9 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     window.side_menu.vn_cleaner_changed.emit(True),
                     window.side_menu.diff_threshold_changed.emit(8.0),
                     window.side_menu.auto_translate_selection_changed.emit(False),
+                    window.side_menu.highlight_rare_words_changed.emit(False),
+                    window.side_menu.dictionary_pass_changed.emit(True),
+                    window.side_menu.kanji_pass_changed.emit(False),
                 ]
             )
 

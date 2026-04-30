@@ -159,7 +159,7 @@ class HistorySidebar(QWidget):
         self._scroll.setWidget(self._container)
         outer.addWidget(self._scroll)
 
-        self._last_text: str | None = None
+        self._last_entry_key: tuple[str, str] | None = None
         self._entry_count = 0
 
     def set_theme(self, pal: ThemePalette):
@@ -192,9 +192,10 @@ class HistorySidebar(QWidget):
 
     def add_entry(self, timestamp: str, engine: str,
                   conf: float, text: str):
-        if text == self._last_text:
+        key = self._build_dedupe_key(text, engine, timestamp)
+        if key == self._last_entry_key:
             return
-        self._last_text = text
+        self._last_entry_key = key
 
         card = HistoryCard(timestamp, engine, conf, text, self._pal or DARK)
         card.tts_requested.connect(self.tts_requested)
@@ -221,5 +222,11 @@ class HistorySidebar(QWidget):
             item = self._cards_layout.takeAt(0)
             if item and item.widget():
                 item.widget().deleteLater()
-        self._last_text = None
+        self._last_entry_key = None
         self._entry_count = 0
+
+    def _build_dedupe_key(self, text: str, engine: str | None, timestamp: str) -> tuple[str, str]:
+        if engine:
+            return (text, engine)
+        bucket = timestamp.rsplit(":", 1)[0] if ":" in timestamp else timestamp
+        return (text, bucket)

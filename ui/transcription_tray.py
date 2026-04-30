@@ -3,12 +3,22 @@ Transcription tray — sits below the preview, left column.
 Three text areas: OCR output, full translation, selection translation.
 """
 
+import logging
+import re
+from dataclasses import dataclass
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QLabel, QPushButton, QFrame, QScrollArea, QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QTextCharFormat, QTextCursor
+
+from core.frequency import annotator as freq_annotator
+from core.frequency import kanji_freq
 from ui.theme import ThemePalette
+
+logger = logging.getLogger(__name__)
 
 
 TRAY_HEIGHTS = {
@@ -23,6 +33,17 @@ FONT_SIZES = {
     "large":  36,
 }
 
+
+@dataclass
+class _RenderToken:
+    surface: str
+    lemma: str | None
+    start: int
+    end: int
+    freq_rank: int | None = None
+
+
+_JP_TOKEN_PATTERN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9f]+")
 
 def _blend_hex(base: str, target: str, ratio: float) -> str:
     """Linearly blend two hex colors."""
@@ -50,6 +71,13 @@ class TranscriptionTray(QWidget):
         super().__init__(parent)
         self.setStyleSheet("background: transparent; border-top: 1px solid transparent;")
         self._primary_buttons: list[QPushButton] = []
+        self._highlight_rare_words = False
+        self._enable_dictionary_pass = True
+        self._enable_kanji_pass = False
+        self._latest_ocr_text: str = ""
+        self._latest_selection_text: str = ""
+        self._rare_format_cache: dict[str, QTextCharFormat] = {}
+        self._kanji_format_cache: dict[int, QTextCharFormat] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(6)
@@ -120,9 +148,8 @@ class TranscriptionTray(QWidget):
         self._sel_text = QTextEdit()
         self._sel_text.setReadOnly(True)
         self._sel_text.setStyleSheet(self._text_style())
-        self._sel_text.setPlaceholderText(
-            "Highlight text in the OCR pane and it will copy here automatically."
-        )
+        self._selection_placeholder = "Highlight text in the OCR pane and it will copy here automatically."
+        self._sel_text.setPlaceholderText(self._selection_placeholder)
         self._sel_scroll = QScrollArea()
         self._sel_scroll.setWidgetResizable(True)
         self._sel_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -178,11 +205,12 @@ class TranscriptionTray(QWidget):
         selected = cursor.selectedText().strip()
         if selected:
             self._sel_text.setPlaceholderText(f'Selected: "{selected}"')
-            # Actual translation fired externally via signal in Stage 6b/6c
-            # For now just show what's selected
-            self._sel_text.setPlainText(selected)
+            self.set_selection_translation(selected)
             self.selection_changed.emit(selected)
         else:
+            self._sel_text.setPlaceholderText(self._selection_placeholder)
+            self._sel_text.clear()
+            self._latest_selection_text = ""
             self.selection_changed.emit("")
 
     # --- Public API ---
@@ -219,13 +247,21 @@ class TranscriptionTray(QWidget):
         self._apply_primary_button_styles()
 
     def set_ocr_text(self, text: str):
-        self._ocr_text.setPlainText(text)
+        normalized = text or ""
+        self._latest_ocr_text = normalized
+        self._ocr_text.setPlainText(normalized)
+        self._apply_token_highlighting(self._ocr_text, normalized)
 
     def set_translation(self, text: str):
         self._trans_text.setPlainText(text)
 
     def set_selection_translation(self, text: str):
-        self._sel_text.setPlainText(text)
+        normalized = text or ""
+        self._latest_selection_text = normalized
+        self._sel_text.setPlainText(normalized)
+        if not self._highlight_rare_words:
+            return
+        self._apply_token_highlighting(self._sel_text, normalized)
 
     def set_translating(self, busy: bool) -> None:
         """Toggle translate button loading state."""
@@ -258,6 +294,28 @@ class TranscriptionTray(QWidget):
                 padding: 6px;
             }}
         """)
+
+    def set_highlight_rare_words(self, enabled: bool) -> None:
+        enabled = bool(enabled)
+        self._highlight_rare_words = enabled
+        if not enabled:
+            self._clear_underlines(self._ocr_text)
+            self._clear_underlines(self._sel_text)
+            return
+        self._apply_token_highlighting(self._ocr_text, self._latest_ocr_text)
+        self._apply_token_highlighting(self._sel_text, self._latest_selection_text)
+
+    def set_enable_dictionary_pass(self, enabled: bool) -> None:
+        self._enable_dictionary_pass = bool(enabled)
+        if self._highlight_rare_words:
+            self._apply_token_highlighting(self._ocr_text, self._latest_ocr_text)
+            self._apply_token_highlighting(self._sel_text, self._latest_selection_text)
+
+    def set_enable_kanji_pass(self, enabled: bool) -> None:
+        self._enable_kanji_pass = bool(enabled)
+        if self._highlight_rare_words:
+            self._apply_token_highlighting(self._ocr_text, self._latest_ocr_text)
+            self._apply_token_highlighting(self._sel_text, self._latest_selection_text)
 
     def _make_header_label(self, text: str) -> QLabel:
         lbl = QLabel(text)
@@ -292,3 +350,237 @@ class TranscriptionTray(QWidget):
 
     def get_selection_text(self) -> str:
         return self._sel_text.toPlainText()
+
+    def _apply_token_highlighting(self, widget: QTextEdit, text: str) -> None:
+        if not self._highlight_rare_words:
+            return
+
+        cursor = widget.textCursor()
+        saved_pos, saved_anchor = cursor.position(), cursor.anchor()
+
+        try:
+            cursor.beginEditBlock()
+
+            # 1. Clear all previous pipeline formatting once
+            cursor.select(QTextCursor.SelectionType.Document)
+            cursor.setCharFormat(QTextCharFormat())
+            cursor.clearSelection()
+
+            # 2. Dictionary pass (Pass 1) — underline only
+            if self._enable_dictionary_pass and freq_annotator.ensure_freq_data_ready():
+                tokens = self._build_tokens(text)
+                if tokens:
+                    freq_annotator.annotate_tokens(tokens)
+                    if freq_annotator.FREQ_DATA_READY:
+                        if logger.isEnabledFor(logging.DEBUG):
+                            dump = [
+                                (getattr(token, "surface", ""), getattr(token, "freq_rank", None))
+                                for token in tokens[:40]
+                            ]
+                            logger.debug("HIGHLIGHT DUMP: %s", dump)
+
+                        for token in tokens:
+                            cursor.setPosition(token.start)
+                            cursor.setPosition(token.end, QTextCursor.MoveMode.KeepAnchor)
+                            rank = getattr(token, "freq_rank", None)
+                            rank = self._normalize_rank(rank)
+                            fmt = self._format_for_rank(rank)
+                            if fmt is not None:
+                                cursor.mergeCharFormat(fmt)
+                        cursor.clearSelection()
+                        logger.debug("Applied dictionary highlighting to %d tokens", len(tokens))
+                    else:
+                        logger.warning("Skipping dictionary highlighting: frequency data unavailable after annotation")
+                else:
+                    logger.debug("No dictionary tokens to highlight")
+            elif self._enable_dictionary_pass:
+                logger.warning("Skipping dictionary highlighting: frequency data unavailable")
+
+            # 3. Kanji pass (Pass 2) — background tint only
+            if self._enable_kanji_pass:
+                kanji_freq.load()
+                for i, ch in enumerate(text):
+                    rank = kanji_freq.lookup(ch)
+                    if rank is None:
+                        continue
+                    fmt = self._format_for_kanji_rank(rank)
+                    if fmt is not None:
+                        cursor.setPosition(i)
+                        cursor.setPosition(i + 1, QTextCursor.MoveMode.KeepAnchor)
+                        cursor.mergeCharFormat(fmt)
+                cursor.clearSelection()
+                logger.debug("Applied kanji background highlighting")
+
+            cursor.endEditBlock()
+        finally:
+            cursor.setPosition(saved_anchor)
+            cursor.setPosition(saved_pos, QTextCursor.MoveMode.KeepAnchor)
+            widget.setTextCursor(cursor)
+
+    def _normalize_rank(self, rank: object) -> int | None:
+        if rank is None:
+            return None
+        if isinstance(rank, int):
+            return rank
+        if isinstance(rank, float):
+            return int(rank)
+        if isinstance(rank, str):
+            stripped = rank.strip()
+            if stripped.isdigit():
+                return int(stripped)
+            try:
+                return int(stripped)
+            except ValueError:
+                return None
+        try:
+            return int(rank)
+        except (TypeError, ValueError):
+            return None
+
+    def _clear_underlines(self, widget: QTextEdit) -> None:
+        cursor = widget.textCursor()
+        cursor.beginEditBlock()
+        cursor.select(QTextCursor.SelectionType.Document)
+        cursor.setCharFormat(QTextCharFormat())
+        cursor.clearSelection()
+        cursor.endEditBlock()
+
+    def _build_tokens(self, text: str) -> list[_RenderToken]:
+        if not text:
+            return []
+
+        import os
+        import time
+
+        from core.frequency import jp_freq
+
+        freq: dict[str, int] = {}
+        try:
+            loaded = jp_freq.load()
+        except Exception:
+            logger.exception("Failed to load frequency data for tokenizer")
+            loaded = {}
+
+        if isinstance(loaded, dict):
+            freq = {
+                k: int(v)
+                for k, v in loaded.items()
+                if isinstance(k, str) and k
+            }
+        elif isinstance(loaded, list):
+            tmp: dict[str, int] = {}
+            for entry in loaded:
+                try:
+                    lemma, rank = entry
+                except Exception:
+                    continue
+                if not isinstance(lemma, str) or not lemma:
+                    continue
+                try:
+                    tmp[lemma] = int(rank)
+                except (TypeError, ValueError):
+                    continue
+            freq = tmp
+        elif hasattr(loaded, "columns") and hasattr(loaded, "__getitem__"):
+            tmp: dict[str, int] = {}
+            try:
+                lemmas = loaded["lemma"]
+                ranks = loaded["rank"]
+                for lemma, rank in zip(lemmas, ranks):
+                    if not isinstance(lemma, str) or not lemma:
+                        continue
+                    try:
+                        tmp[lemma] = int(rank)
+                    except (TypeError, ValueError):
+                        continue
+            except Exception:
+                tmp = {}
+            freq = tmp
+        else:
+            freq = {}
+
+        build_start = time.perf_counter()
+        lemmas_by_length: dict[int, set[str]] = {}
+        for lemma in freq.keys():
+            length = len(lemma)
+            if length <= 0:
+                continue
+            bucket = lemmas_by_length.setdefault(length, set())
+            bucket.add(lemma)
+        max_len = min(12, max(lemmas_by_length.keys(), default=1))
+        build_elapsed = time.perf_counter() - build_start
+        if os.getenv("DESKTOPOCR_DEBUG"):
+            logger.debug("lemmas_by_length built in %.4fs (max_len=%d)", build_elapsed, max_len)
+
+        def _make_token(surface: str, start: int, end: int) -> _RenderToken:
+            try:
+                return _RenderToken(surface, surface, start, end)
+            except TypeError:
+                return _RenderToken(surface=surface, lemma=surface, start=start, end=end)
+
+        tokens: list[_RenderToken] = []
+        n = len(text)
+        i = 0
+        while i < n:
+            matched = False
+            max_candidate = min(max_len, n - i)
+            for length in range(max_candidate, 0, -1):
+                bucket = lemmas_by_length.get(length)
+                if not bucket:
+                    continue
+                candidate = text[i : i + length]
+                if candidate in bucket:
+                    tokens.append(_make_token(candidate, i, i + length))
+                    i += length
+                    matched = True
+                    break
+            if matched:
+                continue
+            ch = text[i : i + 1]
+            tokens.append(_make_token(ch, i, i + 1))
+            i += 1
+
+        if os.getenv("DESKTOPOCR_DEBUG"):
+            preview = [(tok.surface, freq.get(tok.lemma)) for tok in tokens[:10]]
+            logger.debug("TOKENIZER PREVIEW: %s", preview)
+
+        return tokens
+
+    def _format_for_rank(self, rank: int | None) -> QTextCharFormat | None:
+        if rank is None:
+            return None
+        elif rank < 5000:
+            key = "common"
+            style = QTextCharFormat.UnderlineStyle.SingleUnderline
+            color = "#0275d8"
+        elif rank < 20000:
+            key = "less_common"
+            style = QTextCharFormat.UnderlineStyle.DotLine
+            color = "#5bc0de"
+        else:
+            key = "rare"
+            style = QTextCharFormat.UnderlineStyle.WaveUnderline
+            color = "#d9534f"
+
+        fmt = self._rare_format_cache.get(key)
+        if fmt is None:
+            fmt = QTextCharFormat()
+            fmt.setUnderlineStyle(style)
+            fmt.setUnderlineColor(QColor(color))
+            self._rare_format_cache[key] = fmt
+        return fmt
+
+    def _format_for_kanji_rank(self, rank: int) -> QTextCharFormat | None:
+        if rank not in (1, 2):
+            return None
+        fmt = self._kanji_format_cache.get(rank)
+        if fmt is None:
+            fmt = QTextCharFormat()
+            if rank == 1:
+                # Jōyō — soft blue
+                fmt.setBackground(QColor(0, 120, 255, 35))
+            else:
+                # Jinmeiyō — soft orange
+                fmt.setBackground(QColor(255, 140, 0, 35))
+            self._kanji_format_cache[rank] = fmt
+        return fmt
