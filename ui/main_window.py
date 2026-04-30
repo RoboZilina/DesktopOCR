@@ -246,6 +246,7 @@ class MainWindow(QMainWindow):
     def _hide_side_menu(self):
         if not self.side_menu.isVisible():
             return
+        self.side_menu.collapse_all_groups()
         self.side_menu.setVisible(False)
         self._menu_overlay.hide()
         self._menu_overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)

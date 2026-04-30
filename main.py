@@ -545,38 +545,75 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 "diff_threshold": DIFF_THRESHOLD,
             }
 
-            # Wire side menu toggles
-            window.side_menu.auto_capture_changed.connect(
-                lambda v: settings.__setitem__("auto_capture", v)
-            )
-            window.side_menu.auto_copy_changed.connect(
-                lambda v: settings.__setitem__("auto_copy", v)
-            )
+            # Wire side menu toggles — all persist to settings_state on disk
+            def _on_auto_capture_changed(enabled: bool):
+                settings_state["auto_capture"] = enabled
+                save_settings(settings_state)
+            window.side_menu.auto_capture_changed.connect(_on_auto_capture_changed)
+
+            def _on_auto_copy_changed(enabled: bool):
+                settings_state["auto_copy"] = enabled
+                save_settings(settings_state)
+            window.side_menu.auto_copy_changed.connect(_on_auto_copy_changed)
+
             def _on_auto_read_selection_changed(enabled: bool):
                 settings_state["auto_read_selection"] = enabled
                 save_settings(settings_state)
-
             window.side_menu.auto_read_selection_changed.connect(_on_auto_read_selection_changed)
+
             window.side_menu.history_visible_changed.connect(window.history_sidebar.setVisible)
-            window.side_menu.preview_visible_changed.connect(window.preview_widget.setVisible)
+
+            def _on_preview_visible_changed(enabled: bool):
+                settings_state["preview_visible"] = enabled
+                window.preview_widget.setVisible(enabled)
+                save_settings(settings_state)
+            window.side_menu.preview_visible_changed.connect(_on_preview_visible_changed)
+
             window.side_menu.text_size_changed.connect(window.transcription_tray.set_text_size)
             window.side_menu.tray_height_changed.connect(window.transcription_tray.set_tray_height)
+
             def _on_auto_translate_selection_changed(enabled: bool):
                 settings_state["auto_translate_selection"] = enabled
                 save_settings(settings_state)
+            window.side_menu.auto_translate_selection_changed.connect(_on_auto_translate_selection_changed)
 
-            window.side_menu.auto_translate_selection_changed.connect(
-                _on_auto_translate_selection_changed
-            )
-            window.side_menu.vn_cleaner_changed.connect(
-                lambda v: (
-                    settings.__setitem__("vn_cleaner", v),
-                    os.environ.pop("DESKTOCR_DISABLE_VALIDATOR", None) if v else os.environ.__setitem__("DESKTOCR_DISABLE_VALIDATOR", "1"),
-                )
-            )
-            window.side_menu.diff_threshold_changed.connect(
-                lambda v: settings.__setitem__("diff_threshold", v)
-            )
+            def _on_translation_enabled_changed(enabled: bool):
+                settings_state["translation_enabled"] = enabled
+                window._on_translation_enabled_changed(enabled)
+                save_settings(settings_state)
+            window.side_menu.translation_enabled_changed.connect(_on_translation_enabled_changed)
+
+            def _on_translation_backend_changed(backend_id: str):
+                settings_state["translation_backend"] = backend_id
+                window._on_translation_backend_changed(backend_id)
+                save_settings(settings_state)
+            window.side_menu.translation_backend_changed.connect(_on_translation_backend_changed)
+
+            def _on_libre_url_changed(url: str):
+                settings_state["libre_translate_url"] = url or "http://localhost:5000"
+                window._on_libre_url_changed(url)
+                save_settings(settings_state)
+            window.side_menu.libre_url_changed.connect(_on_libre_url_changed)
+
+            def _on_vn_cleaner_changed(enabled: bool):
+                settings_state["vn_cleaner"] = enabled
+                if enabled:
+                    os.environ.pop("DESKTOCR_DISABLE_VALIDATOR", None)
+                else:
+                    os.environ.__setitem__("DESKTOCR_DISABLE_VALIDATOR", "1")
+                save_settings(settings_state)
+            window.side_menu.vn_cleaner_changed.connect(_on_vn_cleaner_changed)
+
+            def _on_ocr_canvas_visible_changed(enabled: bool):
+                settings_state["ocr_canvas_visible"] = enabled
+                window._on_ocr_canvas_visible_changed(enabled)
+                save_settings(settings_state)
+            window.side_menu.ocr_canvas_visible_changed.connect(_on_ocr_canvas_visible_changed)
+
+            def _on_diff_threshold_changed(value: float):
+                settings_state["diff_threshold"] = value
+                save_settings(settings_state)
+            window.side_menu.diff_threshold_changed.connect(_on_diff_threshold_changed)
 
             def _on_highlight_rare_words_changed(enabled: bool):
                 settings_state["highlight_rare_words"] = enabled
@@ -603,6 +640,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_openai_enabled_changed(enabled: bool):
                 settings_state["openai_validator_enabled"] = enabled
                 openai_validator.update_settings(enabled=enabled)
+                save_settings(settings_state)
 
             window.side_menu.openai_validator_enabled_changed.connect(
                 _on_openai_enabled_changed
@@ -616,11 +654,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_openai_model_changed(model: str):
                 settings_state["openai_model"] = model
                 openai_validator.update_settings(model=model)
+                save_settings(settings_state)
             window.side_menu.openai_model_changed.connect(_on_openai_model_changed)
 
             def _on_deepseek_enabled_changed(enabled: bool):
                 settings_state["deepseek_validator_enabled"] = enabled
                 deepseek_validator.update_settings(enabled=enabled)
+                save_settings(settings_state)
 
             def _on_deepseek_api_key_changed(key: str):
                 settings_state["deepseek_api_key"] = key
@@ -631,6 +671,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_deepseek_model_changed(model: str):
                 settings_state["deepseek_model"] = model
                 deepseek_validator.update_settings(model=model)
+                save_settings(settings_state)
 
             window.side_menu.deepseek_validator_enabled_changed.connect(_on_deepseek_enabled_changed)
             window.side_menu.deepseek_api_key_changed.connect(_on_deepseek_api_key_changed)
@@ -639,6 +680,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_google_vision_enabled_changed(enabled: bool):
                 settings_state["google_vision_enabled"] = enabled
                 google_vision.update_settings(enabled=enabled)
+                save_settings(settings_state)
 
             def _on_google_vision_key_changed(key: str):
                 settings_state["google_vision_api_key"] = key
@@ -678,6 +720,21 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state.get("kanji_pass_enabled", False),
                 emit_signal=True,
             )
+            # Restore additional saved settings
+            window.side_menu.set_auto_capture(
+                settings_state.get("auto_capture", True), emit_signal=True
+            )
+            window.side_menu.set_auto_copy(
+                settings_state.get("auto_copy", True), emit_signal=True
+            )
+            if hasattr(window.side_menu, "set_preview_visible"):
+                window.side_menu.set_preview_visible(
+                    settings_state.get("preview_visible", True), emit_signal=True
+                )
+            if hasattr(window.side_menu, "set_ocr_canvas_visible"):
+                window.side_menu.set_ocr_canvas_visible(
+                    settings_state.get("ocr_canvas_visible", False), emit_signal=True
+                )
             window.side_menu.set_openai_validator_enabled(
                 settings_state.get("openai_validator_enabled", False),
                 emit_signal=True,

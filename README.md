@@ -11,7 +11,8 @@ Words are underlined based on how common they are in everyday Japanese:
 
 - **Solid underline** — very common word
 - **Dotted underline** — less common word
-- **No underline** — rare or unknown word
+- **Red wave underline** — rare word
+- **No underline** — not in dictionary / unknown
 
 Inflected forms (e.g., `行かない`, `読んでいた`) automatically inherit the rank of their base dictionary form.
 

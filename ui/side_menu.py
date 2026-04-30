@@ -3,6 +3,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QSlider, QFrame, QSizePolicy, QLineEdit, QScrollArea, QComboBox,
+    QDialog, QTextBrowser,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QEvent
 from ui.theme import ThemePalette, DARK, LIGHT
@@ -80,6 +81,7 @@ class SideMenu(QWidget):
         layout.setSpacing(4)
 
         self._collapsible_panels: list[QFrame] = []
+        self._collapsible_buttons: list[QPushButton] = []
 
         # Header
         self._header = self._create_section_header("SIDE MENU")
@@ -103,10 +105,12 @@ class SideMenu(QWidget):
         layout.addLayout(theme_row)
 
         # Toggle sections
-        self._add_toggle_section(layout, "Auto-Capture",
-                                 self.auto_capture_changed, default=True)
-        self._add_toggle_section(layout, "Auto-Copy",
-                                 self.auto_copy_changed, default=False)
+        self._auto_capture_toggle = self._add_toggle_section(
+            layout, "Auto-Capture", self.auto_capture_changed, default=True
+        )
+        self._auto_copy_toggle = self._add_toggle_section(
+            layout, "Auto-Copy", self.auto_copy_changed, default=False
+        )
         self._auto_read_toggle = self._add_toggle_section(
             layout,
             "Auto-read Selection",
@@ -168,8 +172,20 @@ class SideMenu(QWidget):
             default=True,
             help_text=(
                 "Shows how common each word is. "
-                "Solid underline = very common, dotted = less common, none = rare/unknown. "
+                "Solid = very common, dotted = less common, red wave = rare, none = unknown. "
                 "Inflected forms inherit the base dictionary lemma."
+            ),
+            help_html=(
+                "<h3 style='margin-top:0;color:#7dd3fc;'>Dictionary Frequency Underlines</h3>"
+                "<p>Words are underlined based on how common they are in everyday Japanese:</p>"
+                "<ul>"
+                "<li><b>Solid underline</b> — very common word</li>"
+                "<li><b>Dotted underline</b> — less common word</li>"
+                "<li><b>Red wave underline</b> — rare word</li>"
+                "<li><b>No underline</b> — not in dictionary / unknown</li>"
+                "</ul>"
+                "<p>Inflected forms automatically inherit the rank of their base dictionary "
+                "lemma (e.g., <code>行かない</code> → <code>行く</code>).</p>"
             ),
         )
         self._kanji_pass_toggle = self._add_toggle_section(
@@ -180,6 +196,16 @@ class SideMenu(QWidget):
             help_text=(
                 "Highlights individual kanji by category (Jōyō / Jinmeiyō). "
                 "This layer is additive and does not overwrite dictionary underlines."
+            ),
+            help_html=(
+                "<h3 style='margin-top:0;color:#7dd3fc;'>Kanji Category Backgrounds</h3>"
+                "<p>Individual kanji receive a soft background tint based on category:</p>"
+                "<ul>"
+                "<li><b>Jōyō kanji</b> — standard everyday kanji taught in school</li>"
+                "<li><b>Jinmeiyō kanji</b> — name-use kanji</li>"
+                "</ul>"
+                "<p>This layer is purely visual and never overwrites dictionary "
+                "frequency underlines. Both passes stack safely.</p>"
             ),
         )
 
@@ -480,7 +506,7 @@ class SideMenu(QWidget):
                 background: {btn_hover_bg};
             }}
 
-            #SideMenu QPushButton:not([menuClass]) {{
+            #SideMenu QPushButton {{
                 background: {btn_bg};
                 color: {text};
                 border: 1px solid {btn_border};
@@ -489,20 +515,20 @@ class SideMenu(QWidget):
                 min-height: 28px;
                 font-size: 13px;
             }}
-            #SideMenu QPushButton:not([menuClass]):hover {{
+            #SideMenu QPushButton:hover {{
                 border-color: {accent};
             }}
 
             #SideMenu QPushButton[menuClass="help-btn"] {{
-                background: transparent;
+                background: {btn_bg};
                 color: {text_dim};
                 border: 1px solid {btn_border};
-                border-radius: 10px;
+                border-radius: 14px;
                 padding: 0;
-                min-height: 20px;
-                max-width: 20px;
-                max-height: 20px;
-                font-size: 11px;
+                min-height: 28px;
+                max-width: 28px;
+                max-height: 28px;
+                font-size: 14px;
                 font-weight: 700;
             }}
             #SideMenu QPushButton[menuClass="help-btn"]:hover {{
@@ -538,7 +564,7 @@ class SideMenu(QWidget):
                 background: transparent;
                 border: none;
             }}
-            #SideMenu QScrollArea > QWidget > QWidget {{
+            #SideMenu QScrollArea QWidget {{
                 background: transparent;
             }}
             #SideMenuContent {{
@@ -609,6 +635,7 @@ class SideMenu(QWidget):
         panel.setFrameShape(QFrame.Shape.NoFrame)
         panel.setAutoFillBackground(True)
         self._collapsible_panels.append(panel)
+        self._collapsible_buttons.append(btn)
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 4, 0, 0)
         panel_layout.setSpacing(6)
@@ -667,7 +694,8 @@ class SideMenu(QWidget):
 
     def _add_toggle_section(self, layout, title: str,
                            signal: pyqtSignal, default: bool,
-                           help_text: str | None = None):
+                           help_text: str | None = None,
+                           help_html: str | None = None):
         header = self._create_section_header(title)
         header.setContentsMargins(0, 4, 0, 2)
 
@@ -681,7 +709,11 @@ class SideMenu(QWidget):
             help_btn.setProperty("menuClass", "help-btn")
             help_btn.setToolTip(help_text)
             help_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            help_btn.setFixedSize(20, 20)
+            help_btn.setFixedSize(28, 28)
+            if help_html:
+                help_btn.clicked.connect(
+                    lambda _checked, t=title, h=help_html: self._show_help_dialog(t, h)
+                )
             header_row.addWidget(help_btn, 0)
             layout.addLayout(header_row)
         else:
@@ -734,10 +766,55 @@ class SideMenu(QWidget):
             btn.setChecked(should_check)
             btn.blockSignals(block)
 
+    def collapse_all_groups(self) -> None:
+        for btn, panel in zip(self._collapsible_buttons, self._collapsible_panels):
+            block = btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(block)
+            panel.setVisible(False)
+
     def set_auto_read_selection(self, enabled: bool, *, emit_signal: bool = False) -> None:
         self._set_toggle_state(self._auto_read_toggle, enabled)
         if emit_signal:
             self.auto_read_selection_changed.emit(enabled)
+
+    def _show_help_dialog(self, title: str, html: str) -> None:
+        dlg = QDialog(self)
+        dlg.setWindowTitle(title)
+        dlg.resize(420, 260)
+        dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(12, 12, 12, 12)
+        v.setSpacing(8)
+        browser = QTextBrowser()
+        pal = getattr(self, "_pal", None)
+        bg = pal.panel if pal else "#14161c"
+        text = pal.text if pal else "#f7f8fb"
+        accent = pal.accent if pal else "#10b981"
+        browser.setStyleSheet(
+            f"QTextBrowser {{ background: {bg}; color: {text}; border: none; }}"
+        )
+        browser.setHtml(
+            f"<html><body style='font-family:Segoe UI,Roboto,Noto Sans,sans-serif;"
+            f"font-size:14px;line-height:1.6;color:{text};background:{bg};padding:8px;'>"
+            f"<style>a{{color:{accent};}}</style>{html}</body></html>"
+        )
+        v.addWidget(browser, 1)
+        btn = QPushButton("Close")
+        btn.setProperty("menuClass", "option-btn")
+        btn.clicked.connect(dlg.accept)
+        v.addWidget(btn)
+        dlg.exec()
+
+    def set_auto_capture(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._auto_capture_toggle, enabled)
+        if emit_signal:
+            self.auto_capture_changed.emit(enabled)
+
+    def set_auto_copy(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._auto_copy_toggle, enabled)
+        if emit_signal:
+            self.auto_copy_changed.emit(enabled)
 
     def set_auto_translate_selection(self, enabled: bool, *, emit_signal: bool = False) -> None:
         self._set_toggle_state(self._auto_translate_toggle, enabled)
