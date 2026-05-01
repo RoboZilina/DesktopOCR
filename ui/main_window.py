@@ -39,6 +39,7 @@ class MainWindow(QMainWindow):
     translate_requested = pyqtSignal(str)
     select_window_requested = pyqtSignal()
     stop_stream_requested = pyqtSignal()
+    anki_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -123,6 +124,7 @@ class MainWindow(QMainWindow):
         self.transcription_tray.recapture_requested.connect(self.recapture_requested.emit)
         self.transcription_tray.tts_requested.connect(self.tts_requested.emit)
         self.transcription_tray.selection_changed.connect(self._on_selection_text_changed)
+        self.transcription_tray.anki_requested.connect(self.anki_requested.emit)
         self.history_sidebar.tts_requested.connect(self.tts_requested.emit)
         self.history_sidebar.translate_requested.connect(self.translate_requested.emit)
         # Wire tray translate button → MainWindow.translate_requested
@@ -275,6 +277,21 @@ class MainWindow(QMainWindow):
         return 0, bar_height, self.width(), self.height() - bar_height
 
     # --- Public API for main.py ---
+
+    def set_anki_available(self, available: bool) -> None:
+        self.transcription_tray.set_anki_available(available)
+
+    def get_ocr_text(self) -> str:
+        return self.transcription_tray.get_ocr_text()
+
+    def get_selection_text(self) -> str:
+        return self.transcription_tray.get_selection_text()
+
+    def get_ocr_translation(self) -> str:
+        return self.transcription_tray.get_ocr_translation()
+
+    def get_selection_translation(self) -> str:
+        return self.transcription_tray.get_selection_translation()
 
     def set_ocr_result(self, text: str, confidence: float, engine: str, timestamp: str):
         self.transcription_tray.set_ocr_text(text)

@@ -36,6 +36,16 @@ class SideMenu(QWidget):
     deepseek_model_changed       = pyqtSignal(str)
     google_vision_enabled_changed = pyqtSignal(bool)
     google_vision_api_key_changed = pyqtSignal(str)
+    # Anki integration signals
+    anki_enabled_changed         = pyqtSignal(bool)
+    anki_host_changed            = pyqtSignal(str)
+    anki_port_changed            = pyqtSignal(int)
+    anki_deck_changed            = pyqtSignal(str)
+    anki_tags_changed            = pyqtSignal(str)
+    anki_front_changed           = pyqtSignal(str)
+    anki_back_changed            = pyqtSignal(str)
+    anki_audio_side_changed      = pyqtSignal(str)
+    anki_auto_translate_changed  = pyqtSignal(bool)
     reset_requested          = pyqtSignal()
     hide_requested           = pyqtSignal()
     user_guide_requested     = pyqtSignal()
@@ -54,6 +64,7 @@ class SideMenu(QWidget):
         self._capture_preview_toggle: tuple[QPushButton, QPushButton] | None = None
         self._ocr_canvas_toggle: tuple[QPushButton, QPushButton] | None = None
         self._vn_cleaner_toggle: tuple[QPushButton, QPushButton] | None = None
+        self._anki_toggle: tuple[QPushButton, QPushButton] | None = None
 
         # Outer layout: just holds the scroll area
         outer = QVBoxLayout(self)
@@ -353,6 +364,74 @@ class SideMenu(QWidget):
         self._google_vision_details.setVisible(False)
         self.google_vision_enabled_changed.connect(self._google_vision_details.setVisible)
         ai_layout.addWidget(self._google_vision_details)
+
+        # --- Anki Integration section ---
+        self._anki_toggle_btn, anki_layout = self._create_collapsible_group(
+            "Anki Integration", layout, default_open=False
+        )
+
+        anki_layout.addWidget(self._create_section_header("Anki"))
+        self._anki_toggle = self._add_toggle_section(
+            anki_layout, "Enable Anki",
+            self.anki_enabled_changed, default=False,
+        )
+
+        anki_layout.addWidget(self._create_section_header("Host"))
+        self._anki_host_edit = QLineEdit()
+        self._anki_host_edit.setPlaceholderText("localhost")
+        self._anki_host_edit.editingFinished.connect(
+            lambda: self.anki_host_changed.emit(self._anki_host_edit.text().strip())
+        )
+        anki_layout.addWidget(self._anki_host_edit)
+
+        anki_layout.addWidget(self._create_section_header("Port"))
+        self._anki_port_edit = QLineEdit()
+        self._anki_port_edit.setPlaceholderText("8765")
+        self._anki_port_edit.editingFinished.connect(
+            lambda: self._on_anki_port_finished()
+        )
+        anki_layout.addWidget(self._anki_port_edit)
+
+        anki_layout.addWidget(self._create_section_header("Deck Name"))
+        self._anki_deck_edit = QLineEdit()
+        self._anki_deck_edit.setPlaceholderText("DesktopOCR")
+        self._anki_deck_edit.editingFinished.connect(
+            lambda: self.anki_deck_changed.emit(self._anki_deck_edit.text().strip())
+        )
+        anki_layout.addWidget(self._anki_deck_edit)
+
+        anki_layout.addWidget(self._create_section_header("Tags"))
+        self._anki_tags_edit = QLineEdit()
+        self._anki_tags_edit.setPlaceholderText("japanese vn")
+        self._anki_tags_edit.editingFinished.connect(
+            lambda: self.anki_tags_changed.emit(self._anki_tags_edit.text().strip())
+        )
+        anki_layout.addWidget(self._anki_tags_edit)
+
+        anki_layout.addWidget(self._create_section_header("Front Template"))
+        self._anki_front_combo = QComboBox()
+        self._anki_front_combo.addItems(["screenshot", "screenshot_selection", "selection_only"])
+        self._anki_front_combo.currentTextChanged.connect(self.anki_front_changed.emit)
+        anki_layout.addWidget(self._anki_front_combo)
+
+        anki_layout.addWidget(self._create_section_header("Back Template"))
+        self._anki_back_combo = QComboBox()
+        self._anki_back_combo.addItems(["full_with_context", "selection_only", "full_only"])
+        self._anki_back_combo.currentTextChanged.connect(self.anki_back_changed.emit)
+        anki_layout.addWidget(self._anki_back_combo)
+
+        anki_layout.addWidget(self._create_section_header("Audio Side"))
+        self._anki_audio_side_combo = QComboBox()
+        self._anki_audio_side_combo.addItems(["front", "back", "both"])
+        self._anki_audio_side_combo.currentTextChanged.connect(self.anki_audio_side_changed.emit)
+        anki_layout.addWidget(self._anki_audio_side_combo)
+
+        self._anki_auto_translate_toggle = self._add_toggle_section(
+            anki_layout,
+            "Auto-translate for Anki",
+            self.anki_auto_translate_changed,
+            default=True,
+        )
 
         # Advanced settings toggle (collapsible)
         self._advanced_toggle_btn = QPushButton("Advanced Settings")
@@ -675,6 +754,16 @@ class SideMenu(QWidget):
         self.set_preview_visible(True, emit_signal=True)
         self._set_advanced_visible(False)
         self.set_ocr_canvas_visible(False, emit_signal=True)
+        # Reset Anki settings
+        self.set_anki_enabled(False, emit_signal=True)
+        self.set_anki_host("localhost")
+        self.set_anki_port(8765)
+        self.set_anki_deck("DesktopOCR")
+        self.set_anki_tags("japanese vn")
+        self.set_anki_front("screenshot")
+        self.set_anki_back("full_with_context")
+        self.set_anki_audio_side("front")
+        self.set_anki_auto_translate(True, emit_signal=True)
         self.reset_requested.emit()
 
     def _add_toggle_section(self, layout, title: str,
@@ -960,3 +1049,75 @@ class SideMenu(QWidget):
 
     def update_openai_usage(self, chars: int) -> None:
         self._openai_usage_label.setText(f"Session usage: {chars} chars")
+
+    # --- Anki setters ---
+
+    def set_anki_enabled(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._anki_toggle, enabled)
+        if emit_signal:
+            self.anki_enabled_changed.emit(enabled)
+
+    def set_anki_host(self, host: str) -> None:
+        if hasattr(self, "_anki_host_edit"):
+            self._anki_host_edit.setText(host or "localhost")
+
+    def set_anki_port(self, port: int) -> None:
+        if hasattr(self, "_anki_port_edit"):
+            self._anki_port_edit.setText(str(port))
+
+    def set_anki_deck(self, deck: str) -> None:
+        if hasattr(self, "_anki_deck_edit"):
+            self._anki_deck_edit.setText(deck or "DesktopOCR")
+
+    def set_anki_tags(self, tags: str) -> None:
+        if hasattr(self, "_anki_tags_edit"):
+            self._anki_tags_edit.setText(tags or "japanese vn")
+
+    def set_anki_front(self, mode: str) -> None:
+        if not hasattr(self, "_anki_front_combo"):
+            return
+        combo = self._anki_front_combo
+        block = combo.blockSignals(True)
+        idx = combo.findText(mode)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(block)
+
+    def set_anki_back(self, mode: str) -> None:
+        if not hasattr(self, "_anki_back_combo"):
+            return
+        combo = self._anki_back_combo
+        block = combo.blockSignals(True)
+        idx = combo.findText(mode)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(block)
+
+    def set_anki_audio_side(self, side: str) -> None:
+        if not hasattr(self, "_anki_audio_side_combo"):
+            return
+        combo = self._anki_audio_side_combo
+        block = combo.blockSignals(True)
+        idx = combo.findText(side)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+        else:
+            combo.setCurrentIndex(0)
+        combo.blockSignals(block)
+
+    def set_anki_auto_translate(self, enabled: bool, *, emit_signal: bool = False) -> None:
+        self._set_toggle_state(self._anki_auto_translate_toggle, enabled)
+        if emit_signal:
+            self.anki_auto_translate_changed.emit(enabled)
+
+    def _on_anki_port_finished(self) -> None:
+        raw = self._anki_port_edit.text().strip()
+        try:
+            port = int(raw)
+        except (ValueError, TypeError):
+            port = 8765
+        self.anki_port_changed.emit(port)

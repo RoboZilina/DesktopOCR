@@ -54,6 +54,16 @@ DEFAULT_SETTINGS = {
     # Google Vision settings
     "google_vision_enabled": False,
     "google_vision_api_key": "",
+    # Anki integration settings
+    "anki_enabled": False,
+    "anki_host": "localhost",
+    "anki_port": 8765,
+    "anki_deck": "DesktopOCR",
+    "anki_tags": "japanese vn",
+    "anki_front": "screenshot",
+    "anki_back": "full_with_context",
+    "anki_audio_side": "front",
+    "anki_auto_translate": True,
 }
 
 SETTINGS_PATH = pathlib.Path(__file__).parent / "settings.json"
@@ -105,6 +115,8 @@ from core.tensor_utils import preprocess_paddle_slice
 from logic.openai_validator import OpenAIValidator
 from logic.deepseek_validator import DeepSeekValidator
 from logic.google_vision_ocr import GoogleVisionOCR
+from logic.anki_connect import AnkiConnect
+from logic.anki_card_builder import build_and_send_card
 
 
 
@@ -806,6 +818,30 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state.get("tray_height", "medium")
             )
 
+            # Restore Anki settings (no signals)
+            if hasattr(window.side_menu, "set_anki_enabled"):
+                window.side_menu.set_anki_enabled(
+                    settings_state.get("anki_enabled", False), emit_signal=False
+                )
+            if hasattr(window.side_menu, "set_anki_host"):
+                window.side_menu.set_anki_host(settings_state.get("anki_host", "localhost"))
+            if hasattr(window.side_menu, "set_anki_port"):
+                window.side_menu.set_anki_port(settings_state.get("anki_port", 8765))
+            if hasattr(window.side_menu, "set_anki_deck"):
+                window.side_menu.set_anki_deck(settings_state.get("anki_deck", "DesktopOCR"))
+            if hasattr(window.side_menu, "set_anki_tags"):
+                window.side_menu.set_anki_tags(settings_state.get("anki_tags", "japanese vn"))
+            if hasattr(window.side_menu, "set_anki_front"):
+                window.side_menu.set_anki_front(settings_state.get("anki_front", "screenshot"))
+            if hasattr(window.side_menu, "set_anki_back"):
+                window.side_menu.set_anki_back(settings_state.get("anki_back", "full_with_context"))
+            if hasattr(window.side_menu, "set_anki_audio_side"):
+                window.side_menu.set_anki_audio_side(settings_state.get("anki_audio_side", "front"))
+            if hasattr(window.side_menu, "set_anki_auto_translate"):
+                window.side_menu.set_anki_auto_translate(
+                    settings_state.get("anki_auto_translate", True), emit_signal=False
+                )
+
             # --- Reset ---
             def _apply_defaults_to_ui(window, *, emit_signals: bool) -> None:
                 # Read only from DEFAULT_SETTINGS
@@ -866,6 +902,26 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 if hasattr(window.side_menu, "set_diff_threshold"):
                     window.side_menu.set_diff_threshold(defaults.get("diff_threshold", 8.0), emit_signal=es)
 
+                # Anki settings
+                if hasattr(window.side_menu, "set_anki_enabled"):
+                    window.side_menu.set_anki_enabled(defaults.get("anki_enabled", False), emit_signal=es)
+                if hasattr(window.side_menu, "set_anki_host"):
+                    window.side_menu.set_anki_host(defaults.get("anki_host", "localhost"))
+                if hasattr(window.side_menu, "set_anki_port"):
+                    window.side_menu.set_anki_port(defaults.get("anki_port", 8765))
+                if hasattr(window.side_menu, "set_anki_deck"):
+                    window.side_menu.set_anki_deck(defaults.get("anki_deck", "DesktopOCR"))
+                if hasattr(window.side_menu, "set_anki_tags"):
+                    window.side_menu.set_anki_tags(defaults.get("anki_tags", "japanese vn"))
+                if hasattr(window.side_menu, "set_anki_front"):
+                    window.side_menu.set_anki_front(defaults.get("anki_front", "screenshot"))
+                if hasattr(window.side_menu, "set_anki_back"):
+                    window.side_menu.set_anki_back(defaults.get("anki_back", "full_with_context"))
+                if hasattr(window.side_menu, "set_anki_audio_side"):
+                    window.side_menu.set_anki_audio_side(defaults.get("anki_audio_side", "front"))
+                if hasattr(window.side_menu, "set_anki_auto_translate"):
+                    window.side_menu.set_anki_auto_translate(defaults.get("anki_auto_translate", True), emit_signal=es)
+
                 # Apply non-side-menu visual state directly to widgets
                 window.preview_widget.setVisible(defaults.get("preview_visible", True))
                 window._on_ocr_canvas_visible_changed(defaults.get("ocr_canvas_visible", False))
@@ -897,6 +953,134 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 OpenJTalkBackend(),
             ])
             window.tts_requested.connect(tts.speak)
+
+            # ---- Anki integration ----------------------------------------
+            anki = AnkiConnect(
+                host=settings_state.get("anki_host", "localhost"),
+                port=settings_state.get("anki_port", 8765),
+            )
+
+            _anki_note_type_ensured = False
+
+            async def _check_anki() -> None:
+                """Poll AnkiConnect availability every 30 s and update the tray button."""
+                nonlocal _anki_note_type_ensured
+                available = await anki.is_available()
+                if available and not _anki_note_type_ensured:
+                    ok = await anki.ensure_note_type()
+                    if ok:
+                        _anki_note_type_ensured = True
+                if window is not None:
+                    window.set_anki_available(available)
+
+            async def _on_anki_requested() -> None:
+                """Build and send an Anki card from the current OCR state."""
+                if window is None:
+                    return
+                ocr_text = window.get_ocr_text()
+                selection_text = window.get_selection_text()
+                cached_translation = window.get_ocr_translation()
+
+                # Fire translations for both texts concurrently (silent, for Anki only)
+                async def _translate(text: str) -> str | None:
+                    if not text or not text.strip():
+                        return None
+                    if not getattr(window, "_translation_enabled", True):
+                        return None
+                    try:
+                        return await window._translation_manager.translate(text)
+                    except Exception:
+                        return None
+
+                tasks = [_translate(ocr_text)]
+                if selection_text and selection_text.strip():
+                    tasks.append(_translate(selection_text))
+
+                results = await asyncio.gather(*tasks)
+                ocr_translation = (
+                    results[0] if results and not isinstance(results[0], Exception) and results[0]
+                    else (cached_translation or None)
+                )
+                selection_translation = (
+                    results[1] if len(results) > 1 and not isinstance(results[1], Exception) and results[1]
+                    else None
+                )
+
+                audio_path = getattr(tts, "last_audio_path", None)
+                ok = await build_and_send_card(
+                    anki, capture,
+                    ocr_text, selection_text,
+                    ocr_translation, selection_translation,
+                    audio_path,
+                    settings_state,
+                )
+                if ok and window is not None:
+                    window.set_status("Done", "Anki card saved")
+                elif window is not None:
+                    window.set_status("Error", "Anki card failed")
+
+            # Wire Anki button
+            window.anki_requested.connect(
+                lambda: asyncio.ensure_future(_on_anki_requested())
+            )
+
+            # Periodic availability check
+            _anki_timer = QTimer(window)
+            _anki_timer.timeout.connect(
+                lambda: asyncio.ensure_future(_check_anki())
+            )
+            _anki_timer.start(30_000)
+            # Also fire once immediately on startup
+            asyncio.ensure_future(_check_anki())
+
+            # Wire side menu Anki signals
+            def _on_anki_enabled_changed(enabled: bool):
+                settings_state["anki_enabled"] = enabled
+                _do_save()
+            window.side_menu.anki_enabled_changed.connect(_on_anki_enabled_changed)
+
+            def _on_anki_host_changed(host: str):
+                settings_state["anki_host"] = host
+                anki._base_url = f"http://{host}:{settings_state.get('anki_port', 8765)}"
+                _do_save()
+            window.side_menu.anki_host_changed.connect(_on_anki_host_changed)
+
+            def _on_anki_port_changed(port: int):
+                settings_state["anki_port"] = port
+                host = settings_state.get("anki_host", "localhost")
+                anki._base_url = f"http://{host}:{port}"
+                _do_save()
+            window.side_menu.anki_port_changed.connect(_on_anki_port_changed)
+
+            def _on_anki_deck_changed(deck: str):
+                settings_state["anki_deck"] = deck
+                _do_save()
+            window.side_menu.anki_deck_changed.connect(_on_anki_deck_changed)
+
+            def _on_anki_tags_changed(tags: str):
+                settings_state["anki_tags"] = tags
+                _do_save()
+            window.side_menu.anki_tags_changed.connect(_on_anki_tags_changed)
+
+            def _on_anki_front_changed(mode: str):
+                settings_state["anki_front"] = mode
+                _do_save()
+            window.side_menu.anki_front_changed.connect(_on_anki_front_changed)
+
+            def _on_anki_back_changed(mode: str):
+                settings_state["anki_back"] = mode
+                _do_save()
+            window.side_menu.anki_back_changed.connect(_on_anki_back_changed)
+
+            def _on_anki_audio_side_changed(side: str):
+                settings_state["anki_audio_side"] = side
+                _do_save()
+            window.side_menu.anki_audio_side_changed.connect(_on_anki_audio_side_changed)
+
+            def _on_anki_auto_translate_changed(enabled: bool):
+                settings_state["anki_auto_translate"] = enabled
+                _do_save()
+            window.side_menu.anki_auto_translate_changed.connect(_on_anki_auto_translate_changed)
 
             # Populate voice selector from TTS backend
             voices = tts.list_voices()

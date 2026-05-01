@@ -7,6 +7,7 @@ class TTSManager:
     def __init__(self, backends):
         # register provided backends
         self.backends = {b.name: b for b in backends}
+        self.last_audio_path: str | None = None
 
         # register COEIROINK only if not already provided
         if "coeiroink" not in self.backends:
@@ -26,6 +27,7 @@ class TTSManager:
     def speak(self, text: str):
         print(f"[TTSManager] speak() active backend: {self.active.name}")
         result = self.active.speak(text)
+        self.last_audio_path = getattr(self.active, "last_audio_path", None)
         if result is None:
             return
         # Play returned audio data (COEIROINK etc.)

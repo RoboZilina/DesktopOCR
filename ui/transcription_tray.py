@@ -68,6 +68,7 @@ class TranscriptionTray(QWidget):
     tts_requested       = pyqtSignal(str)   # text to speak
     translate_requested = pyqtSignal(str)   # text to translate (full)
     selection_changed   = pyqtSignal(str)
+    anki_requested      = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -101,6 +102,15 @@ class TranscriptionTray(QWidget):
         self._recapture_btn.clicked.connect(lambda: self.recapture_requested.emit())
         self._primary_buttons.append(self._recapture_btn)
         ocr_header.addWidget(self._recapture_btn)
+
+        self._anki_btn = QPushButton("🃏 Anki")
+        self._anki_btn.setFixedHeight(28)
+        self._anki_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._anki_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self._anki_btn.clicked.connect(lambda: self.anki_requested.emit())
+        self._anki_btn.setEnabled(False)  # disabled until AnkiConnect is reachable
+        self._primary_buttons.append(self._anki_btn)
+        ocr_header.addWidget(self._anki_btn)
         layout.addLayout(ocr_header)
 
         self._ocr_text = QTextEdit()
@@ -340,6 +350,16 @@ class TranscriptionTray(QWidget):
 
     def get_selection_text(self) -> str:
         return self._sel_text.toPlainText()
+
+    def get_ocr_translation(self) -> str:
+        return self._trans_text.toPlainText()
+
+    def get_selection_translation(self) -> str:
+        return self._trans_text.toPlainText()
+
+    def set_anki_available(self, available: bool) -> None:
+        """Enable/disable the Anki button based on AnkiConnect reachability."""
+        self._anki_btn.setEnabled(available)
 
     def _apply_token_highlighting(self, widget: QTextEdit, text: str) -> None:
         if not text:
