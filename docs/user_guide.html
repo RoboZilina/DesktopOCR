@@ -247,7 +247,7 @@
       </div>
       <div class="card">
         <span class="pill">Auto-translate</span>
-        <p>When on, translations are fetched silently in the background when you click 🃏. Falls back to the displayed translation if the API call fails.</p>
+        <p>When on, translations are fetched silently in the background when you click 🃏. Translation is always fetched fresh from the API for the Anki card.</p>
       </div>
     </div>
 
@@ -256,10 +256,10 @@
     <ul>
       <li><strong>Front</strong> — rendered HTML with screenshot/text based on your template choice</li>
       <li><strong>Back</strong> — rendered HTML with context/translation based on your template choice</li>
-      <li><strong>TargetText</strong> — raw OCR text</li>
-      <li><strong>TargetTranslation</strong> — translated OCR text</li>
-      <li><strong>ContextText</strong> — selected/highlighted text</li>
-      <li><strong>ContextTranslation</strong> — translation of selected text</li>
+      <li><strong>TargetText</strong> — selected text (or full OCR text if nothing selected)</li>
+      <li><strong>TargetTranslation</strong> — translation of the target text</li>
+      <li><strong>ContextText</strong> — full OCR output (surrounding context)</li>
+      <li><strong>ContextTranslation</strong> — translation of the context text</li>
       <li><strong>Screenshot</strong> — full-window screenshot as an HTML <code><img></code> tag referencing the file stored in Anki's media collection</li>
     </ul>
     <p>Audio (if available) is attached as a separate media file linked from the card side chosen in settings.</p>

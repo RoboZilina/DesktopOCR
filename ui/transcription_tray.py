@@ -354,9 +354,6 @@ class TranscriptionTray(QWidget):
     def get_ocr_translation(self) -> str:
         return self._trans_text.toPlainText()
 
-    def get_selection_translation(self) -> str:
-        return self._trans_text.toPlainText()
-
     def set_anki_available(self, available: bool, last_error: str | None = None) -> None:
         """Update the Anki button's availability state and tooltip."""
         self._anki_available = available

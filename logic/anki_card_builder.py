@@ -95,7 +95,7 @@ async def build_and_send_card(
     screenshot_filename = f"desktopocr_{timestamp}.png"
 
     fields: dict[str, str] = {
-        "TargetText": ((selection_text or "").strip() or (ocr_text or "").strip()),
+        "TargetText": target_text,
         "TargetTranslation": (selection_translation or "").strip(),
         "ContextText": (ocr_text or "").strip(),
         "ContextTranslation": (ocr_translation or "").strip(),
@@ -139,6 +139,7 @@ async def build_and_send_card(
     elif front_mode == "selection_only":
         front_html = "<div class='target'>{TargetText}</div>"
     else:
+        logger.warning("[Anki] Unknown front_mode '%s', falling back to screenshot", front_mode)
         front_html = "{Screenshot}"
 
     # ------------------------------------------------------------------
@@ -225,8 +226,9 @@ async def build_and_send_card(
                 with open(path, "rb") as f:
                     audio_b64 = base64.b64encode(f.read()).decode("ascii")
                 filename = f"desktopocr_audio_{timestamp}_{idx}.mp3"
-                # Target audio (idx=0) follows user's audio_side setting.
-                # Context audio (idx>=1, e.g. full_with_context) attaches to Back only,
+                # Target audio (idx=0) follows user's audio_side setting
+                # (front, back, or both configurable in side menu).
+                # Context audio (idx>=1, e.g. full_with_context) always attaches to Back only,
                 # since ContextText/ContextTranslation render on the back of the card.
                 fields_for_this = audio_fields if idx == 0 else ["Back"]
                 audio_dicts.append({

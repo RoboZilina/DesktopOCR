@@ -411,7 +411,7 @@ class SideMenu(QWidget):
         self._anki_host_edit = QLineEdit()
         self._anki_host_edit.setPlaceholderText("localhost")
         self._anki_host_edit.editingFinished.connect(
-            lambda: self.anki_host_changed.emit(self._anki_host_edit.text().strip())
+            lambda: self._on_anki_host_finished()
         )
         anki_layout.addWidget(self._anki_host_edit)
 
@@ -427,7 +427,7 @@ class SideMenu(QWidget):
         self._anki_deck_edit = QLineEdit()
         self._anki_deck_edit.setPlaceholderText("DesktopOCR")
         self._anki_deck_edit.editingFinished.connect(
-            lambda: self.anki_deck_changed.emit(self._anki_deck_edit.text().strip())
+            lambda: self._on_anki_deck_finished()
         )
         anki_layout.addWidget(self._anki_deck_edit)
 
@@ -1151,10 +1151,28 @@ class SideMenu(QWidget):
         if emit_signal:
             self.anki_auto_translate_changed.emit(enabled)
 
+    def _on_anki_host_finished(self) -> None:
+        raw = self._anki_host_edit.text().strip()
+        if not raw:
+            raw = "localhost"
+            # Restore the default host in the field so the user sees what was applied
+            self._anki_host_edit.setText(raw)
+        self.anki_host_changed.emit(raw)
+
     def _on_anki_port_finished(self) -> None:
         raw = self._anki_port_edit.text().strip()
         try:
             port = int(raw)
         except (ValueError, TypeError):
             port = 8765
+            # Restore the valid port in the field so the user sees what was applied
+            self._anki_port_edit.setText(str(port))
         self.anki_port_changed.emit(port)
+
+    def _on_anki_deck_finished(self) -> None:
+        raw = self._anki_deck_edit.text().strip()
+        if not raw:
+            raw = "DesktopOCR"
+            # Restore the default deck name in the field so the user sees what was applied
+            self._anki_deck_edit.setText(raw)
+        self.anki_deck_changed.emit(raw)

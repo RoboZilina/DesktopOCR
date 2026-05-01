@@ -82,6 +82,23 @@ def load_settings() -> dict:
             logging.getLogger(__name__).warning("Failed to load settings: %s", exc)
     if settings.get("text_size") not in ("small", "medium", "large"):
         settings["text_size"] = "medium"
+    # Defensive type guards — settings.json may be hand-edited with invalid types
+    if not isinstance(settings.get("anki_host"), str):
+        settings["anki_host"] = "localhost"
+    if not isinstance(settings.get("anki_port"), int):
+        settings["anki_port"] = 8765
+    if not isinstance(settings.get("anki_deck"), str):
+        settings["anki_deck"] = "DesktopOCR"
+    if not isinstance(settings.get("anki_tags"), str):
+        settings["anki_tags"] = "japanese, vn"
+    if not isinstance(settings.get("anki_front"), str):
+        settings["anki_front"] = "screenshot"
+    if not isinstance(settings.get("anki_back"), str):
+        settings["anki_back"] = "full_with_context"
+    if not isinstance(settings.get("anki_audio_side"), str):
+        settings["anki_audio_side"] = "front"
+    if not isinstance(settings.get("anki_auto_translate"), bool):
+        settings["anki_auto_translate"] = True
     return settings
 
 
@@ -1095,12 +1112,17 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_anki_enabled_changed(enabled: bool):
                 settings_state["anki_enabled"] = enabled
                 window.set_anki_visible(enabled)
+                if enabled:
+                    anki.last_error = None
+                    asyncio.create_task(_check_anki())
                 _do_save()
             window.side_menu.anki_enabled_changed.connect(_on_anki_enabled_changed)
 
             def _on_anki_host_changed(host: str):
                 settings_state["anki_host"] = host
                 anki.set_host_port(host, settings_state.get("anki_port", 8765))
+                anki.last_error = None
+                asyncio.create_task(_check_anki())
                 _do_save()
             window.side_menu.anki_host_changed.connect(_on_anki_host_changed)
 
@@ -1108,6 +1130,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state["anki_port"] = port
                 host = settings_state.get("anki_host", "localhost")
                 anki.set_host_port(host, port)
+                anki.last_error = None
+                asyncio.create_task(_check_anki())
                 _do_save()
             window.side_menu.anki_port_changed.connect(_on_anki_port_changed)
 
@@ -1197,10 +1221,14 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             # Wire re-capture button in tray to force immediate OCR
             def _on_recapture():
+                nonlocal _capture_gen
                 if hwnd is None:
                     QMessageBox.warning(window, "No area selected",
                                         "Please select a source window first.")
                     return
+                # Bump generation to invalidate any in-flight OCR result,
+                # forcing a fresh capture once the current one finishes.
+                _capture_gen += 1
                 ocr_trigger.set()
             window.recapture_requested.connect(_on_recapture)
             ref_frame: np.ndarray | None = None
@@ -1223,77 +1251,95 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         if capture.last_frame is None:
                             logger.debug("[Preview] Got full frame but _last_frame is still None! shape=%s", full_frame.shape)
                         window.set_preview_frame(full_frame)
+                        # New frame arrived — restart stabilize timer
                         if settings_state["auto_capture"] and selection_ready:
                             if _stabilize_task and not _stabilize_task.done():
                                 _stabilize_task.cancel()
                             _stabilize_task = asyncio.create_task(_trigger_after_stabilize())
+                    else:
+                        # Identical frame (MD5 match) — ensure a stabilize task is pending
+                        # so auto-capture keeps working on static content.
+                        if settings_state["auto_capture"] and selection_ready:
+                            if _stabilize_task is None or _stabilize_task.done():
+                                _stabilize_task = asyncio.create_task(_trigger_after_stabilize())
                     await asyncio.sleep(PREVIEW_INTERVAL)
 
             async def _ocr_task():
                 nonlocal _capture_gen
                 while not stop_event.is_set():
-                    if not streaming_enabled:
-                        await asyncio.sleep(0.5)
-                        continue
-                    if not selection_ready:
-                        await asyncio.sleep(0.2)
-                        continue
-                    if settings_state["auto_capture"]:
-                        try:
-                            await asyncio.wait_for(ocr_trigger.wait(), timeout=0.5)
-                            ocr_trigger.clear()
-                        except asyncio.TimeoutError:
+                    try:
+                        if not streaming_enabled:
+                            await asyncio.sleep(0.5)
                             continue
-                        _capture_gen += 1
-                        this_gen = _capture_gen
-                    else:
-                        await asyncio.sleep(1.5)
+                        if not selection_ready:
+                            await asyncio.sleep(0.2)
+                            continue
+                        if settings_state["auto_capture"]:
+                            try:
+                                await asyncio.wait_for(ocr_trigger.wait(), timeout=0.5)
+                                ocr_trigger.clear()
+                            except asyncio.TimeoutError:
+                                continue
+                            _capture_gen += 1
+                            this_gen = _capture_gen
+                        else:
+                            # Manual mode: wait for Re-capture button only
+                            try:
+                                await asyncio.wait_for(ocr_trigger.wait(), timeout=1.5)
+                                ocr_trigger.clear()
+                            except asyncio.TimeoutError:
+                                continue
+                            this_gen = None
+
                         if stop_event.is_set():
                             break
-                        this_gen = None
-
-                    if stop_event.is_set():
-                        break
-
-                    if window is not None:
-                        window.set_status("Processing…", "")
-                    ocr_started = time.perf_counter()
-                    res = await pipeline.capture_once(line_count=_selected_line_count())
-                    elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
-
-                    # Discard stale result if a newer trigger fired during OCR
-                    if this_gen is not None and this_gen != _capture_gen:
-                        continue
-
-                    if res is not None:
-                        text = res.get("text", "")
-                        conf = res.get("confidence", 0.0)
-                        meta = res.get("meta", {}) if isinstance(res, dict) else {}
-                        preprocessed_frame = res.get("preprocessed_frame") if isinstance(res, dict) else None
-                        raw_frame = res.get("frame") if isinstance(res, dict) else None
-                        boxes = meta.get("boxes") if isinstance(meta, dict) else None
-                        engine_id = meta.get("engine", engine_manager.current_id)
-                        if window is not None:
-                            window.set_ocr_boxes(boxes)
-                            window.set_ocr_canvas_frames(raw_frame, preprocessed_frame, boxes)
-                        timestamp = datetime.now().strftime("%H:%M:%S")
-                        print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
-                        if text:
-                            window.set_ocr_result(text, float(conf), engine_id, timestamp)
-                        if settings_state["auto_copy"] and text:
-                            from PyQt6.QtWidgets import QApplication
-                            QApplication.clipboard().setText(text)
-                            
-                        window.side_menu.update_openai_usage(openai_validator.cost_estimate_chars)
 
                         if window is not None:
-                            summary_text = _build_status_summary(meta=meta, conf=float(conf or 0.0), elapsed_ms=elapsed_ms)
-                            window.set_status("Done", summary_text)
-                    else:
-                        if window is not None:
-                            window.set_status("Ready", "")
+                            window.set_status("Processing…", "")
+                        ocr_started = time.perf_counter()
+                        res = await pipeline.capture_once(line_count=_selected_line_count())
+                        elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
 
-                    await asyncio.sleep(1.5)
+                        # Discard stale result if a newer trigger fired during OCR
+                        if this_gen is not None and this_gen != _capture_gen:
+                            continue
+
+                        if res is not None:
+                            text = res.get("text", "")
+                            conf = res.get("confidence", 0.0)
+                            meta = res.get("meta", {}) if isinstance(res, dict) else {}
+                            preprocessed_frame = res.get("preprocessed_frame") if isinstance(res, dict) else None
+                            raw_frame = res.get("frame") if isinstance(res, dict) else None
+                            boxes = meta.get("boxes") if isinstance(meta, dict) else None
+                            engine_id = meta.get("engine", engine_manager.current_id)
+                            if window is not None:
+                                window.set_ocr_boxes(boxes)
+                                window.set_ocr_canvas_frames(raw_frame, preprocessed_frame, boxes)
+                            timestamp = datetime.now().strftime("%H:%M:%S")
+                            print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
+                            if text:
+                                window.set_ocr_result(text, float(conf), engine_id, timestamp)
+                            if settings_state["auto_copy"] and text:
+                                from PyQt6.QtWidgets import QApplication
+                                QApplication.clipboard().setText(text)
+                                
+                            window.side_menu.update_openai_usage(openai_validator.cost_estimate_chars)
+
+                            if window is not None:
+                                summary_text = _build_status_summary(meta=meta, conf=float(conf or 0.0), elapsed_ms=elapsed_ms)
+                                window.set_status("Done", summary_text)
+                        else:
+                            if window is not None:
+                                window.set_status("Ready", "")
+
+                        # Simple cooldown — does NOT touch ocr_trigger, so stabilize /
+                        # Re-capture triggers are preserved for the main consumer
+                        # at the top of the loop.
+                        await asyncio.sleep(0.5)
+
+                    except Exception as exc:
+                        logger.error("[OCR] Task crashed: %s", exc, exc_info=True)
+                        await asyncio.sleep(1.0)
 
             preview_task = asyncio.create_task(_preview_task())
             ocr_task = asyncio.create_task(_ocr_task())

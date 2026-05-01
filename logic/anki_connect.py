@@ -119,7 +119,18 @@ class AnkiConnect:
 
     async def _request_urllib(self, body: str, timeout: float, *,
                               quiet: bool = False) -> dict[str, Any] | None:
-        """Fallback using urllib.request wrapped in a thread-pool executor."""
+        """Fallback using urllib.request wrapped in a thread-pool executor.
+
+        Thread-safety note: _sync_post runs in a thread-pool executor
+        (run_in_executor), which is the only path where ``self.last_error`` is
+        assigned without holding ``self._lock``. This is safe because:
+        1. ``_request()`` selects exactly one transport — aiohttp XOR urllib.
+        2. ``_sync_post`` executes sequentially within its thread, with no
+           concurrent coroutine access to ``self.last_error``.
+        3. The GIL prevents simultaneous writes from Python threads.
+        The async lock is only needed for the aiohttp path where multiple
+        coroutines could interleave.
+        """
         import urllib.request  # noqa: PLC0415
 
         loop = asyncio.get_running_loop()
@@ -300,11 +311,6 @@ class AnkiConnect:
         if data is None:
             if self.last_error is None:
                 await self._set_error("Card save failed")
-            return None
-        error_text = data.get("error")
-        if error_text is not None:
-            short_error = str(error_text)[:80]
-            await self._set_error(f"Anki rejected the card: {short_error}")
             return None
         result = data.get("result")
         if isinstance(result, (int, float)):

@@ -293,9 +293,6 @@ class MainWindow(QMainWindow):
     def get_ocr_translation(self) -> str:
         return self.transcription_tray.get_ocr_translation()
 
-    def get_selection_translation(self) -> str:
-        return self.transcription_tray.get_selection_translation()
-
     def set_ocr_result(self, text: str, confidence: float, engine: str, timestamp: str):
         self.transcription_tray.set_ocr_text(text)
         self.history_sidebar.add_entry(timestamp, engine, confidence, text)
