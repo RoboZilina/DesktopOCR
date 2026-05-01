@@ -30,7 +30,15 @@ class AnkiConnect:
         self._base_url = f"http://{host}:{port}"
         self.last_error: str | None = None
         self._last_error_lock = asyncio.Lock()
-        self._consecutive_failures: int = 0
+
+    def set_host_port(self, host: str, port: int) -> None:
+        """Update the AnkiConnect endpoint without creating a new client instance."""
+        self._base_url = f"http://{host}:{port}"
+
+    @property
+    def base_url(self) -> str:
+        """Return the current AnkiConnect endpoint URL."""
+        return self._base_url
 
     async def _set_error(self, msg: str) -> None:
         async with self._last_error_lock:
@@ -39,7 +47,6 @@ class AnkiConnect:
     async def _clear_error(self) -> None:
         async with self._last_error_lock:
             self.last_error = None
-            self._consecutive_failures = 0
 
     # ------------------------------------------------------------------
     # Session management
@@ -89,17 +96,22 @@ class AnkiConnect:
                 ) as resp:
                     if resp.status != 200:
                         logger.warning("[Anki] HTTP %d from %s", resp.status, self._base_url)
+                        await self._set_error(f"HTTP {resp.status} from AnkiConnect")
                         return None
                     data = await resp.json()
                     if "error" in data and data["error"] is not None:
-                        logger.warning("[Anki] Error in '%s': %s", json.loads(body)["action"], data["error"])
+                        error_text = str(data["error"])[:80]
+                        logger.warning("[Anki] Error in '%s': %s", json.loads(body)["action"], error_text)
+                        action = json.loads(body).get("action", "unknown")
+                        await self._set_error(f"Anki rejected '{action}': {error_text}")
                         return None
                     return data
-            except (asyncio.TimeoutError, aiohttp.ClientError, OSError, ConnectionRefusedError) as exc:
+            except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
                 if quiet:
                     logger.debug("[Anki] Poll failed: %s", exc)
                 else:
                     logger.warning("[Anki] Request failed: %s", exc)
+                await self._set_error(f"Transport error: {exc}")
                 return None
             except json.JSONDecodeError as exc:
                 logger.warning("[Anki] JSON decode error: %s", exc)
@@ -123,11 +135,16 @@ class AnkiConnect:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if "error" in data and data["error"] is not None:
+                        error_text = str(data["error"])[:80]
                         logger.warning(
                             "[Anki] Error in '%s': %s",
                             json.loads(body)["action"],
-                            data["error"],
+                            error_text,
                         )
+                        action = json.loads(body).get("action", "unknown")
+                        # Direct assignment safe here — _sync_post runs in a
+                        # thread-pool executor and no concurrent coroutine access.
+                        self.last_error = f"Anki rejected '{action}': {error_text}"
                         return None
                     return data
             except urllib.error.URLError as exc:
@@ -135,12 +152,18 @@ class AnkiConnect:
                     logger.debug("[Anki] Poll failed: %s", exc)
                 else:
                     logger.warning("[Anki] Request failed: %s", exc)
+                # Direct assignment safe here — _sync_post runs in a
+                # thread-pool executor and no concurrent coroutine access.
+                self.last_error = f"Transport error: {exc}"
                 return None
             except (OSError, TimeoutError) as exc:
                 if quiet:
                     logger.debug("[Anki] Poll failed: %s", exc)
                 else:
                     logger.warning("[Anki] Request failed: %s", exc)
+                # Direct assignment safe here — _sync_post runs in a
+                # thread-pool executor and no concurrent coroutine access.
+                self.last_error = f"Transport error: {exc}"
                 return None
             except json.JSONDecodeError as exc:
                 logger.warning("[Anki] JSON decode error: %s", exc)
@@ -159,7 +182,6 @@ class AnkiConnect:
         """
         data = await self._request("version", timeout=2.0, quiet=True)
         if data is None:
-            self._consecutive_failures += 1
             await self._set_error("Anki is not running")
             return False
         result = data.get("result")
@@ -241,7 +263,7 @@ class AnkiConnect:
         fields: dict[str, str],
         tags: list[str] | None = None,
         *,
-        audio: dict | None = None,
+        audio: list[dict] | dict | None = None,
         picture: dict | None = None,
     ) -> int | None:
         """Add a new note to *deck_name*.
@@ -250,8 +272,11 @@ class AnkiConnect:
             deck_name: Target deck name.
             fields: Dict mapping field names to their HTML/text content.
             tags: Optional list of tag strings.
-            audio: Optional audio dict with keys ``data``, ``filename``, ``fields``.
-            picture: Optional picture dict with keys ``data``, ``filename``, ``fields``.
+            audio: Optional audio dict (or list of dicts) with keys ``data``,
+                ``filename``, ``fields``. AnkiConnect accepts both a single
+                object or an array.
+            picture: Optional picture dict with keys ``data``, ``filename``,
+                ``fields``.
 
         Returns:
             The new note ID (int) on success, or ``None`` on failure.
@@ -264,7 +289,10 @@ class AnkiConnect:
             "options": {"allowDuplicate": False},
         }
         if audio is not None:
-            note["audio"] = [audio]
+            if isinstance(audio, list):
+                note["audio"] = audio
+            else:
+                note["audio"] = [audio]
         if picture is not None:
             note["picture"] = [picture]
 

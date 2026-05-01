@@ -10,6 +10,7 @@ from dataclasses import dataclass
 
 from PyQt6.QtWidgets import (
     QApplication,
+    QMessageBox,
     QWidget, QVBoxLayout, QHBoxLayout,
     QTextEdit, QLabel, QPushButton, QFrame, QScrollArea, QSizePolicy,
 )

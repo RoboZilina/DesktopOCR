@@ -334,6 +334,10 @@ class MainWindow(QMainWindow):
     def set_status(self, status_text: str, summary_text: str):
         self.status_bar.set_status(status_text, summary_text)
 
+    def get_translation_manager(self):
+        """Return the translation manager instance (public accessor)."""
+        return self._translation_manager
+
     def get_translator_summary(self) -> str:
         backend = getattr(self, "_translation_backend", "auto") or "auto"
         label_map = {

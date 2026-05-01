@@ -43,6 +43,29 @@ DesktopOCR can save OCR results (text, translation, screenshot, TTS audio) to [A
 1. **Anki** installed and **running**
 2. **AnkiConnect** add-on installed (Tools → Add-ons → Get Add-ons → code `2055492159`)
 
+### Note Type
+
+The app auto-creates a **DesktopOCR** note type with 7 fields:
+- **Front** / **Back** — rendered HTML based on your template choices
+- **TargetText** — the selected (or full OCR) text
+- **TargetTranslation** — translation of the target text
+- **ContextText** — full OCR output (surrounding context)
+- **ContextTranslation** — translation of the context text
+- **Screenshot** — full-window screenshot as an `<img>` tag
+
+### Settings
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Host | `localhost` | AnkiConnect host |
+| Port | `8765` | AnkiConnect port |
+| Deck | `DesktopOCR` | Target Anki deck (created automatically) |
+| Tags | `japanese, vn` | Comma-separated tags on every card |
+| Front Template | `screenshot` | Card front: screenshot, screenshot+text, or text-only |
+| Back Template | `full_with_context` | Card back: full context, selection, or OCR-only |
+| Audio Side | `front` | Attach TTS audio to front, back, or both |
+| Auto-translate | `true` | Silently fetch translations when saving a card |
+
 ### Quick Start
 
 1. Open the side menu → **Anki Integration** section
@@ -50,7 +73,5 @@ DesktopOCR can save OCR results (text, translation, screenshot, TTS audio) to [A
 3. Click **Test Connection** to verify AnkiConnect is reachable (the app also polls every 30s)
 4. Get an OCR result, optionally select text and trigger translation
 5. Click **🃏 Anki** to save a card to the `DesktopOCR` deck
-
-Default host: `localhost`, port: `8765`, deck: `DesktopOCR`.
 
 > **Note:** Anki must be running for AnkiConnect to respond. The 🃏 button is always clickable when visible; if AnkiConnect is unreachable a dialog explains the issue.

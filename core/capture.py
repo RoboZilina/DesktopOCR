@@ -187,6 +187,7 @@ def _capture_bitblt(hwnd: int) -> Optional[np.ndarray]:
         width = rect.right - rect.left
         height = rect.bottom - rect.top
         if width <= 0 or height <= 0:
+            log.warning("_capture_bitblt: zero client area for HWND=0x%X (w=%d, h=%d)", hwnd, width, height)
             return None
 
         dpi_scale = 1.0
@@ -200,6 +201,7 @@ def _capture_bitblt(hwnd: int) -> Optional[np.ndarray]:
         width = int(round(width * dpi_scale))
         height = int(round(height * dpi_scale))
         if width <= 0 or height <= 0:
+            log.warning("_capture_bitblt: zero dimensions after DPI scaling for HWND=0x%X (w=%d, h=%d)", hwnd, width, height)
             return None
 
         # Device contexts
@@ -288,6 +290,7 @@ class ScreenCapture:
         self._region: Optional[Tuple[int, int, int, int]] = None  # (x, y, w, h)
         self._last_full_hash: Optional[str] = None
         self._last_crop_hash: Optional[str] = None
+        self._last_frame: Optional[np.ndarray] = None  # most recent full frame (for Anki screenshots)
 
         # WinRT objects — initialised lazily in _ensure_session()
         self._d3d_device = None
@@ -342,6 +345,15 @@ class ScreenCapture:
         """Read-only view of the current capture region (x, y, w, h) or None."""
         return self._region
 
+    @property
+    def last_frame(self) -> Optional[np.ndarray]:
+        """The most recently captured full frame, or None if none captured yet.
+
+        Used by the Anki screenshot pipeline to avoid an extra OS-level capture.
+        Populated automatically by the preview loop via ``_apply_diff_and_crop``.
+        """
+        return self._last_frame
+
     async def get_frame(self, full: bool = False, force: bool = False) -> Optional[np.ndarray]:
         """
         Capture one frame, run frame-diff check, optionally crop to region, return BGR ndarray.
@@ -366,7 +378,7 @@ class ScreenCapture:
                 return await self._get_frame_bitblt(full=full, force=force)
             return await self._get_frame_winrt(full=full, force=force)
         except Exception as exc:
-            log.error("get_frame error: %s", exc, exc_info=True)
+            log.error("get_frame error (full=%s, force=%s): %s", full, force, exc, exc_info=True)
             return None
 
     def stop(self) -> None:
@@ -464,13 +476,13 @@ class ScreenCapture:
     # WinRT frame acquisition
     # ------------------------------------------------------------------
 
-    async def _get_frame_winrt(self, full: bool = False) -> Optional[np.ndarray]:
+    async def _get_frame_winrt(self, full: bool = False, force: bool = False) -> Optional[np.ndarray]:
         """Acquire one frame from the WinRT frame pool and return it as BGR ndarray."""
         if not await self._ensure_session():
             return None
 
         if self._use_bitblt:
-            return await self._get_frame_bitblt(full=full)
+            return await self._get_frame_bitblt(full=full, force=force)
 
         if self._frame_pool is None:
             log.warning(
@@ -478,7 +490,7 @@ class ScreenCapture:
                 self._hwnd,
             )
             self._use_bitblt = True
-            return await self._get_frame_bitblt(full=full)
+            return await self._get_frame_bitblt(full=full, force=force)
 
         loop = asyncio.get_running_loop()
         future: asyncio.Future[Optional[np.ndarray]] = loop.create_future()
@@ -539,7 +551,7 @@ class ScreenCapture:
         if raw_frame is None:
             return None
 
-        return self._apply_diff_and_crop(raw_frame, full=full)
+        return self._apply_diff_and_crop(raw_frame, full=full, force=force)
 
     def _frame_to_numpy(self, frame) -> Optional[np.ndarray]:
         """
@@ -609,6 +621,7 @@ class ScreenCapture:
         loop = asyncio.get_running_loop()
         raw_frame = await loop.run_in_executor(None, _capture_bitblt, self._hwnd)
         if raw_frame is None:
+            log.warning("_get_frame_bitblt: _capture_bitblt returned None (full=%s, force=%s)", full, force)
             return None
         return self._apply_diff_and_crop(raw_frame, full=full, force=force)
 
@@ -637,7 +650,15 @@ class ScreenCapture:
 
         # When force=True, skip the MD5 frame-diff check entirely.
         # Used by the Anki screenshot path to guarantee a fresh capture.
+        # Still update the hash so the next regular capture doesn't match stale state.
         if force:
+            new_hash = hashlib.md5(target.tobytes()).hexdigest()
+            if full:
+                self._last_full_hash = new_hash
+                self._last_frame = target.copy()
+                log.debug("_apply_diff_and_crop: force=True, full=True — _last_frame set (shape=%s)", target.shape)
+            else:
+                self._last_crop_hash = new_hash
             return target
 
         # Frame diff — mirrors the pattern from instructions.md / capture_pipeline.js
@@ -645,8 +666,11 @@ class ScreenCapture:
         
         if full:
             if new_hash == self._last_full_hash:
+                log.debug("_apply_diff_and_crop: full-frame MD5 match — returning None")
                 return None  # identical region — skip
             self._last_full_hash = new_hash
+            self._last_frame = target.copy()
+            log.debug("_apply_diff_and_crop: full=True — _last_frame set (shape=%s, hash=%s)", target.shape, new_hash[:12])
         else:
             if new_hash == self._last_crop_hash:
                 return None  # identical region — skip

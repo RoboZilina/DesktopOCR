@@ -16,6 +16,20 @@ class EdgeTTSBackend(TTSBackend):
     def __init__(self):
         self._tts = EdgeTTS()
 
+    @property
+    def last_audio_path(self) -> str | None:
+        """Path to the most recently generated audio file, if any."""
+        return getattr(self._tts, "last_audio_path", None)
+
+    async def generate(self, text: str) -> str | None:
+        """Generate audio for *text* silently (no playback) and return the temp path.
+
+        This is used by the Anki integration to produce audio attachments
+        without playing them through the speaker.
+        """
+        await self._tts.speak(text, play_audio=False)
+        return self._tts.last_audio_path
+
     def speak(self, text: str):
         try:
             loop = asyncio.get_event_loop()

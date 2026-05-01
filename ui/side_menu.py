@@ -392,7 +392,7 @@ class SideMenu(QWidget):
             "<ul>"
             "<li><strong>Host / Port</strong> — AnkiConnect runs on localhost:8765 by default.</li>"
             "<li><strong>Deck Name</strong> — Saved cards go here. Created automatically.</li>"
-            "<li><strong>Tags</strong> — Comma-separated tags on each card (default: japanese vn).</li>"
+            "<li><strong>Tags</strong> — Comma-separated tags on each card (default: japanese, vn).</li>"
             "<li><strong>Front / Back Templates</strong> — Which content appears on each side.</li>"
             "<li><strong>Audio Side</strong> — Attach TTS audio to front, back, or both.</li>"
             "<li><strong>Auto-translate</strong> — Silently fetches translations when you click 🃏.</li>"
@@ -433,7 +433,7 @@ class SideMenu(QWidget):
 
         anki_layout.addWidget(self._create_section_header("Tags"))
         self._anki_tags_edit = QLineEdit()
-        self._anki_tags_edit.setPlaceholderText("japanese vn")
+        self._anki_tags_edit.setPlaceholderText("japanese, vn")
         self._anki_tags_edit.editingFinished.connect(
             lambda: self.anki_tags_changed.emit(self._anki_tags_edit.text().strip())
         )
@@ -796,7 +796,7 @@ class SideMenu(QWidget):
         self.set_anki_host("localhost")
         self.set_anki_port(8765)
         self.set_anki_deck("DesktopOCR")
-        self.set_anki_tags("japanese vn")
+        self.set_anki_tags("japanese, vn")
         self.set_anki_front("screenshot")
         self.set_anki_back("full_with_context")
         self.set_anki_audio_side("front")
@@ -1108,7 +1108,7 @@ class SideMenu(QWidget):
 
     def set_anki_tags(self, tags: str) -> None:
         if hasattr(self, "_anki_tags_edit"):
-            self._anki_tags_edit.setText(tags or "japanese vn")
+            self._anki_tags_edit.setText(tags or "japanese, vn")
 
     def set_anki_front(self, mode: str) -> None:
         if not hasattr(self, "_anki_front_combo"):

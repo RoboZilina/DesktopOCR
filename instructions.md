@@ -37,11 +37,19 @@ desktopOCR/
 │   └── vision.py                 ← OpenCV preprocessing (optional, toggleable)
 │
 ├── logic/
-│   └── validator.py              ← Japanese char-range filter + confidence threshold
+│   ├── anki_card_builder.py      ← Assembles Anki note fields, HTML templates, screenshot, audio
+│   ├── anki_connect.py           ← AnkiConnect HTTP client (aiohttp/urllib fallback)
+│   ├── validator.py              ← Japanese char-range filter + confidence threshold
+│   ├── openai_validator.py       ← OpenAI API-based text validator
+│   ├── deepseek_validator.py     ← DeepSeek API-based text validator
+│   └── google_vision_ocr.py      ← Google Vision API OCR fallback
 │
 ├── ui/
-│   ├── overlay.py                ← PyQt6 transparent always-on-top window
-│   └── components.py             ← status pill, history log, engine selector
+│   ├── main_window.py            ← Main application window, wires all UI components
+│   ├── side_menu.py              ← Slide-in settings panel with toggles and inputs
+│   ├── transcription_tray.py     ← OCR text display, translation, Anki/TTS buttons
+│   ├── user_guide_dialog.py      ← Modal dialog that loads docs/user_guide.html
+│   └── (overlay.py removed, replaced by main_window.py)
 │
 ├── models/
 │   ├── paddle/

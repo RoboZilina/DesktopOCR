@@ -59,7 +59,7 @@ DEFAULT_SETTINGS = {
     "anki_host": "localhost",
     "anki_port": 8765,
     "anki_deck": "DesktopOCR",
-    "anki_tags": "japanese vn",
+    "anki_tags": "japanese, vn",
     "anki_front": "screenshot",
     "anki_back": "full_with_context",
     "anki_audio_side": "front",
@@ -382,7 +382,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     window.set_status("Ready", "")
 
             window.engine_changed.connect(
-                lambda eid: asyncio.ensure_future(_on_engine_changed(eid))
+                lambda eid: asyncio.create_task(_on_engine_changed(eid))
             )
 
             if hasattr(window, "set_active_engine"):
@@ -831,7 +831,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             if hasattr(window.side_menu, "set_anki_deck"):
                 window.side_menu.set_anki_deck(settings_state.get("anki_deck", "DesktopOCR"))
             if hasattr(window.side_menu, "set_anki_tags"):
-                window.side_menu.set_anki_tags(settings_state.get("anki_tags", "japanese vn"))
+                window.side_menu.set_anki_tags(settings_state.get("anki_tags", "japanese, vn"))
             if hasattr(window.side_menu, "set_anki_front"):
                 window.side_menu.set_anki_front(settings_state.get("anki_front", "screenshot"))
             if hasattr(window.side_menu, "set_anki_back"):
@@ -913,7 +913,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 if hasattr(window.side_menu, "set_anki_deck"):
                     window.side_menu.set_anki_deck(defaults.get("anki_deck", "DesktopOCR"))
                 if hasattr(window.side_menu, "set_anki_tags"):
-                    window.side_menu.set_anki_tags(defaults.get("anki_tags", "japanese vn"))
+                    window.side_menu.set_anki_tags(defaults.get("anki_tags", "japanese, vn"))
                 if hasattr(window.side_menu, "set_anki_front"):
                     window.side_menu.set_anki_front(defaults.get("anki_front", "screenshot"))
                 if hasattr(window.side_menu, "set_anki_back"):
@@ -961,17 +961,19 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 port=settings_state.get("anki_port", 8765),
             )
 
-            _anki_note_type_ensured = False
             _anki_busy = False
 
             async def _check_anki() -> None:
                 """Poll AnkiConnect availability every 30 s and update the tray button."""
-                nonlocal _anki_note_type_ensured
+                if not settings_state.get("anki_enabled", False):
+                    return
                 available = await anki.is_available()
-                if available and not _anki_note_type_ensured:
+                if available:
                     ok = await anki.ensure_note_type()
-                    if ok:
-                        _anki_note_type_ensured = True
+                    if not ok:
+                        # Note type creation failed — show button as unavailable
+                        # so the user sees the error message in the tooltip.
+                        available = False
                 if window is not None:
                     window.set_anki_available(available, anki.last_error)
 
@@ -984,7 +986,10 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 try:
                     ocr_text = window.get_ocr_text()
                     selection_text = window.get_selection_text()
-                    cached_translation = window.get_ocr_translation()
+                    # Don't use the UI translation box — it shows the selection
+                    # translation, not the OCR translation. Always translate fresh
+                    # for the Anki card to ensure correct text/translation pairs.
+                    cached_translation = None
 
                     # Fire translations for both texts concurrently (silent, for Anki only)
                     async def _translate(text: str) -> str | None:
@@ -993,30 +998,72 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         if not getattr(window, "_translation_enabled", True):
                             return None
                         try:
-                            return await window._translation_manager.translate(text)
+                            return await window.get_translation_manager().translate(text)
                         except Exception:
                             return None
 
-                    tasks = [_translate(ocr_text)]
-                    if selection_text and selection_text.strip():
-                        tasks.append(_translate(selection_text))
+                    # Translate sequentially — TranslationManager uses a per-call lock
+                    # that silently skips concurrent requests (returns "").
+                    # Sequential translation avoids lock contention and ensures both
+                    # texts are properly translated.
+                    ocr_translation = cached_translation or None
+                    selection_translation = None
+                    if settings_state.get("anki_auto_translate", True):
+                        if not ocr_translation:
+                            ocr_result = await _translate(ocr_text)
+                            ocr_translation = ocr_result or None
+                        if selection_text and selection_text.strip():
+                            sel_result = await _translate(selection_text)
+                            selection_translation = sel_result or None
 
-                    results = await asyncio.gather(*tasks)
-                    ocr_translation = (
-                        results[0] if results and not isinstance(results[0], Exception) and results[0]
-                        else (cached_translation or None)
-                    )
-                    selection_translation = (
-                        results[1] if len(results) > 1 and not isinstance(results[1], Exception) and results[1]
-                        else None
-                    )
+                    # Auto-generate TTS audio for the card.
+                    # Always generate for target_text (selection -> OCR fallback).
+                    # When back template is full_with_context and selection differs
+                    # from OCR, also generate for the full OCR context text.
+                    audio_paths: list[str] = []
+                    tts_backend = getattr(tts, "active", None)
+                    target_text_for_tts = (selection_text or "").strip() or (ocr_text or "").strip()
 
-                    audio_path = getattr(tts, "last_audio_path", None)
+                    if target_text_for_tts and hasattr(tts_backend, "generate"):
+                        path = await tts_backend.generate(target_text_for_tts)
+                        if path:
+                            audio_paths.append(path)
+
+                    back_mode = settings_state.get("anki_back", "full_with_context")
+                    needs_context_audio = (
+                        back_mode == "full_with_context"
+                        and selection_text
+                        and selection_text.strip()
+                        and ocr_text
+                        and ocr_text.strip()
+                        and ocr_text.strip() != target_text_for_tts
+                    )
+                    if needs_context_audio and hasattr(tts_backend, "generate"):
+                        path = await tts_backend.generate(ocr_text)
+                        if path:
+                            audio_paths.append(path)
+
+                    logger.info(
+                        "[Anki] _on_anki_requested: calling build_and_send_card with "
+                        "ocr_text='%s' (len=%d), selection_text='%s' (len=%d), "
+                        "ocr_translation='%s' (len=%d), selection_translation='%s' (len=%d), "
+                        "anki_auto_translate=%r, audio_paths=%s",
+                        ocr_text[:60] if ocr_text else "(empty)",
+                        len(ocr_text or ""),
+                        selection_text[:60] if selection_text else "(empty)",
+                        len(selection_text or ""),
+                        ocr_translation[:60] if ocr_translation else "(empty)",
+                        len(ocr_translation or ""),
+                        selection_translation[:60] if selection_translation else "(empty)",
+                        len(selection_translation or ""),
+                        settings_state.get("anki_auto_translate", True),
+                        audio_paths or "(none)",
+                    )
                     ok = await build_and_send_card(
                         anki, capture,
                         ocr_text, selection_text,
                         ocr_translation, selection_translation,
-                        audio_path,
+                        audio_paths,
                         settings_state,
                     )
                     if ok and window is not None:
@@ -1025,24 +1072,24 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         reason = anki.last_error or "Card save failed"
                         window.set_status("Error", f"Anki: {reason}")
                     if window is not None:
-                        asyncio.get_event_loop().call_later(3.0, lambda: window.set_status("Ready", ""))
+                        asyncio.get_event_loop().call_later(3.0, lambda: window.set_status("Ready", "") if window is not None else None)
                 finally:
                     _anki_busy = False
 
             # Wire Anki button
             window.anki_requested.connect(
-                lambda: asyncio.ensure_future(_on_anki_requested())
+                lambda: asyncio.create_task(_on_anki_requested())
             )
 
             # Periodic availability check
             from PyQt6.QtCore import QTimer
             _anki_timer = QTimer(window)
             _anki_timer.timeout.connect(
-                lambda: asyncio.ensure_future(_check_anki())
+                lambda: asyncio.create_task(_check_anki())
             )
             _anki_timer.start(30_000)
             # Also fire once immediately on startup
-            asyncio.ensure_future(_check_anki())
+            asyncio.create_task(_check_anki())
 
             # Wire side menu Anki signals
             def _on_anki_enabled_changed(enabled: bool):
@@ -1053,14 +1100,14 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             def _on_anki_host_changed(host: str):
                 settings_state["anki_host"] = host
-                anki._base_url = f"http://{host}:{settings_state.get('anki_port', 8765)}"
+                anki.set_host_port(host, settings_state.get("anki_port", 8765))
                 _do_save()
             window.side_menu.anki_host_changed.connect(_on_anki_host_changed)
 
             def _on_anki_port_changed(port: int):
                 settings_state["anki_port"] = port
                 host = settings_state.get("anki_host", "localhost")
-                anki._base_url = f"http://{host}:{port}"
+                anki.set_host_port(host, port)
                 _do_save()
             window.side_menu.anki_port_changed.connect(_on_anki_port_changed)
 
@@ -1102,11 +1149,11 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 if available:
                     window.set_status("Done", "AnkiConnect OK ✓")
                 else:
-                    reason = anki.last_error or f"Cannot reach Anki at {anki._base_url}"
+                    reason = anki.last_error or f"Cannot reach Anki at {anki.base_url}"
                     window.set_status("Error", reason)
-                asyncio.get_event_loop().call_later(3.0, lambda: window.set_status("Ready", ""))
+                asyncio.get_event_loop().call_later(3.0, lambda: window.set_status("Ready", "") if window is not None else None)
             window.side_menu.anki_test_requested.connect(
-                lambda: asyncio.ensure_future(_on_anki_test_requested())
+                lambda: asyncio.create_task(_on_anki_test_requested())
             )
 
             # Populate voice selector from TTS backend
@@ -1173,11 +1220,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         continue
                     full_frame = await capture.get_frame(full=True)
                     if full_frame is not None:
+                        if capture.last_frame is None:
+                            logger.debug("[Preview] Got full frame but _last_frame is still None! shape=%s", full_frame.shape)
                         window.set_preview_frame(full_frame)
                         if settings_state["auto_capture"] and selection_ready:
                             if _stabilize_task and not _stabilize_task.done():
                                 _stabilize_task.cancel()
-                            _stabilize_task = asyncio.ensure_future(_trigger_after_stabilize())
+                            _stabilize_task = asyncio.create_task(_trigger_after_stabilize())
                     await asyncio.sleep(PREVIEW_INTERVAL)
 
             async def _ocr_task():
@@ -1246,8 +1295,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
                     await asyncio.sleep(1.5)
 
-            preview_task = asyncio.ensure_future(_preview_task())
-            ocr_task = asyncio.ensure_future(_ocr_task())
+            preview_task = asyncio.create_task(_preview_task())
+            ocr_task = asyncio.create_task(_ocr_task())
             try:
                 await stop_event.wait()
             finally:

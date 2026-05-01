@@ -24,5 +24,14 @@
   "deepseek_api_key": "",
   "deepseek_model": "deepseek-chat",
   "google_vision_enabled": false,
-  "google_vision_api_key": ""
+  "google_vision_api_key": "",
+  "anki_enabled": false,
+  "anki_host": "localhost",
+  "anki_port": 8765,
+  "anki_deck": "DesktopOCR",
+  "anki_tags": "japanese, vn",
+  "anki_front": "screenshot",
+  "anki_back": "full_with_context",
+  "anki_audio_side": "front",
+  "anki_auto_translate": true
 }

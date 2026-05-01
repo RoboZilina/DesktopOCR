@@ -26,7 +26,7 @@ async def build_and_send_card(
     selection_text: str | None,
     ocr_translation: str | None,
     selection_translation: str | None,
-    audio_path: str | None,
+    audio_paths: list[str] | None,
     config: dict,
 ) -> bool:
     """Capture a full-window screenshot, assemble an Anki note, and send it.
@@ -38,49 +38,64 @@ async def build_and_send_card(
         selection_text: User-selected text (subset of OCR output), or ``None``.
         ocr_translation: Translation of the full OCR text, or ``None``.
         selection_translation: Translation of the selection text, or ``None``.
-        audio_path: Path to a TTS audio file to attach, or ``None``.
+        audio_paths: List of paths to TTS audio files to attach, or ``None``.
+            When multiple paths are provided (e.g. target + context audio),
+            each gets a unique filename and is embedded in the card.
         config: Settings dict containing ``anki_*`` keys (see module docstring).
 
     Returns:
         ``True`` if the card was saved successfully, ``False`` otherwise.
     """
     # ------------------------------------------------------------------
-    # 1. Grab full-window screenshot (with retry)
+    # 1. Grab screenshot from the last preview frame
     # ------------------------------------------------------------------
     screenshot_b64: str | None = None
-    for _attempt in range(3):
-        try:
-            full_frame = await capture.get_frame(full=True, force=True)
-            if full_frame is not None:
-                success, buf = cv2.imencode(".png", full_frame)
-                if success:
-                    screenshot_b64 = base64.b64encode(buf).tobytes().decode("ascii")
-                    break  # success, exit retry loop
-        except Exception:  # noqa: BLE001
-            pass
-        # Brief pause before retry — lets the frame pool settle
-        await asyncio.sleep(0.1)
-    else:
-        logger.warning("[Anki] Screenshot capture failed after 3 attempts, continuing without it")
+    try:
+        full_frame = capture.last_frame
+        logger.info(
+            "[Anki] Screenshot: capture.last_frame is %s (type=%s)",
+            "None" if full_frame is None else f"ndarray shape={full_frame.shape}",
+            type(full_frame).__name__ if full_frame is not None else "N/A",
+        )
+        if full_frame is not None:
+            success, buf = cv2.imencode(".png", full_frame)
+            if success:
+                # buf is a numpy ndarray; convert to bytes before base64
+                screenshot_b64 = base64.b64encode(buf.tobytes()).decode("ascii")
+            else:
+                logger.warning("[Anki] Screenshot: cv2.imencode failed on last_frame")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[Anki] Screenshot exception: %s", exc)
+    if screenshot_b64 is None:
+        logger.warning("[Anki] No preview frame available for screenshot, continuing without it")
 
     # ------------------------------------------------------------------
     # 2. Determine target text
     # ------------------------------------------------------------------
     target_text = (selection_text or "").strip() or (ocr_text or "").strip()
+    logger.info(
+        "[Anki] target_text computed: target_text='%s' (selection=%r, ocr=%r, selection_empty=%r, ocr_empty=%r)",
+        target_text[:60] if target_text else "(empty)",
+        bool(selection_text),
+        bool(ocr_text),
+        not (selection_text or "").strip(),
+        not (ocr_text or "").strip(),
+    )
 
     # Empty-text guard — reject card creation when there is nothing to study.
     if not target_text:
         logger.warning("[Anki] No target text available, skipping card creation")
+        anki.last_error = "No target text to save"
         return False
 
     # ------------------------------------------------------------------
     # 3. Build fields dict
     # ------------------------------------------------------------------
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     screenshot_filename = f"desktopocr_{timestamp}.png"
 
     fields: dict[str, str] = {
-        "TargetText": (selection_text or "").strip(),
+        "TargetText": ((selection_text or "").strip() or (ocr_text or "").strip()),
         "TargetTranslation": (selection_translation or "").strip(),
         "ContextText": (ocr_text or "").strip(),
         "ContextTranslation": (ocr_translation or "").strip(),
@@ -88,6 +103,19 @@ async def build_and_send_card(
             f'<img src="{screenshot_filename}">' if screenshot_b64 else ""
         ),
     }
+    logger.info(
+        "[Anki] fields dict built: TargetText='%s' (len=%d), ContextText='%s' (len=%d), "
+        "TargetTranslation='%s' (len=%d), ContextTranslation='%s' (len=%d), has_screenshot=%r",
+        fields["TargetText"][:60] if fields["TargetText"] else "(empty)",
+        len(fields["TargetText"]),
+        fields["ContextText"][:60] if fields["ContextText"] else "(empty)",
+        len(fields["ContextText"]),
+        fields["TargetTranslation"][:60] if fields["TargetTranslation"] else "(empty)",
+        len(fields["TargetTranslation"]),
+        fields["ContextTranslation"][:60] if fields["ContextTranslation"] else "(empty)",
+        len(fields["ContextTranslation"]),
+        bool(screenshot_b64),
+    )
 
     # ------------------------------------------------------------------
     # 4. Build front HTML
@@ -96,9 +124,14 @@ async def build_and_send_card(
 
     # When screenshot is unavailable, fall back to text-only front templates
     # so the card is still usable for study.
+    # Use ContextText as the fallback content so the front is never blank
+    # when there is no selection text.
     if not screenshot_b64 and front_mode in ("screenshot", "screenshot_selection"):
-        logger.info("[Anki] Screenshot unavailable, falling back to text-only front")
-        front_html = "<div class='target'>{TargetText}</div>"
+        logger.info("[Anki] Screenshot unavailable, falling back to text-only front (context=%s)", bool(target_text))
+        if target_text:
+            front_html = "<div class='target'>{TargetText}</div>"
+        else:
+            front_html = "<div class='context'>{ContextText}</div>"
     elif front_mode == "screenshot":
         front_html = "{Screenshot}"
     elif front_mode == "screenshot_selection":
@@ -153,48 +186,77 @@ async def build_and_send_card(
         front_html = front_html.replace(placeholder, value)
         back_html = back_html.replace(placeholder, value)
 
+    logger.info(
+        "[Anki] After substitution: front_html (first 150 chars)='%s', front_html_is_empty=%r",
+        front_html[:150].replace("\n", "\\n"),
+        not front_html.strip() or front_html.strip() in ("", "<div class='target'></div>", "<div class='context'></div>"),
+    )
+
     fields["Front"] = front_html
     fields["Back"] = back_html
 
+    logger.info(
+        "[Anki] Final fields: Front='%s' (len=%d), Back='%s' (len=%d)",
+        fields["Front"][:80] if fields["Front"] else "(empty)",
+        len(fields["Front"]),
+        fields["Back"][:80] if fields["Back"] else "(empty)",
+        len(fields["Back"]),
+    )
+
     # ------------------------------------------------------------------
-    # 6. Build audio dict
+    # 6. Build audio dicts for all available audio files
     # ------------------------------------------------------------------
-    audio_dict: dict | None = None
-    if audio_path and os.path.isfile(audio_path):
-        try:
-            with open(audio_path, "rb") as f:
-                audio_b64 = base64.b64encode(f.read()).decode("ascii")
-            audio_side = config.get("anki_audio_side", "front")
-            if audio_side == "front":
-                audio_fields = ["Front"]
-            elif audio_side == "back":
-                audio_fields = ["Back"]
-            else:  # "both"
-                audio_fields = ["Front", "Back"]
-            audio_dict = {
-                "data": audio_b64,
-                "filename": "desktopocr_audio.mp3",
-                "fields": audio_fields,
-            }
-        except Exception:  # noqa: BLE001
-            logger.warning("[Anki] Failed to read audio file %s", audio_path)
+    # Build audio dicts for all available audio files.
+    # The caller provides both target and context audio when
+    # full_with_context is enabled; AnkiConnect accepts an array.
+    audio_dicts: list[dict[str, Any]] = []
+    audio_paths = audio_paths or []
+    audio_side = config.get("anki_audio_side", "front")
+    if audio_side == "front":
+        audio_fields = ["Front"]
+    elif audio_side == "back":
+        audio_fields = ["Back"]
+    else:  # "both"
+        audio_fields = ["Front", "Back"]
+
+    for idx, path in enumerate(audio_paths):
+        if path and os.path.isfile(path):
+            try:
+                with open(path, "rb") as f:
+                    audio_b64 = base64.b64encode(f.read()).decode("ascii")
+                filename = f"desktopocr_audio_{timestamp}_{idx}.mp3"
+                # Target audio (idx=0) follows user's audio_side setting.
+                # Context audio (idx>=1, e.g. full_with_context) attaches to Back only,
+                # since ContextText/ContextTranslation render on the back of the card.
+                fields_for_this = audio_fields if idx == 0 else ["Back"]
+                audio_dicts.append({
+                    "data": audio_b64,
+                    "filename": filename,
+                    "fields": fields_for_this,
+                })
+            except Exception:  # noqa: BLE001
+                logger.warning("[Anki] Failed to read audio file %s", path)
 
     # ------------------------------------------------------------------
     # 7. Build picture dict for screenshot
     # ------------------------------------------------------------------
     picture_dict: dict | None = None
     if screenshot_b64:
+        # Picture dict stores the image in Anki's media collection.
+        # The <img> tags are already embedded in the Front/Back fields
+        # via {Screenshot} substitution above; keep fields empty to
+        # avoid duplicate <img> insertion by AnkiConnect.
         picture_dict = {
             "data": screenshot_b64,
             "filename": screenshot_filename,
-            "fields": ["Front", "Back"],
+            "fields": [],
         }
 
     # ------------------------------------------------------------------
     # 8. Parse tags
     # ------------------------------------------------------------------
-    tags_str = config.get("anki_tags", "japanese vn")
-    tags = [t.strip() for t in tags_str.split() if t.strip()]
+    tags_str = config.get("anki_tags", "japanese, vn")
+    tags = [t.strip() for t in tags_str.split(",") if t.strip()]
 
     # ------------------------------------------------------------------
     # 9. Send to Anki
@@ -214,7 +276,7 @@ async def build_and_send_card(
             deck_name,
             fields,
             tags,
-            audio=audio_dict,
+            audio=audio_dicts if audio_dicts else None,
             picture=picture_dict,
         )
         if note_id is not None:

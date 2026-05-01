@@ -2,6 +2,8 @@
 import asyncio
 import io
 import logging
+import os
+import tempfile
 
 logger = logging.getLogger(__name__)
 
@@ -19,20 +21,26 @@ class EdgeTTS:
         self.voice = voice
         self._lock = asyncio.Lock()
         self._enabled = True
+        self.last_audio_path: str | None = None
         try:
             import pygame
             pygame.mixer.init()
         except Exception as exc:
             logger.warning("pygame unavailable; Edge TTS audio playback will not work: %s", exc)
 
-    async def speak(self, text: str) -> None:
-        logger.info("EdgeTTS.speak() called: text=%s", text[:50])
+    async def speak(self, text: str, play_audio: bool = True) -> None:
+        """Generate TTS audio, save to temp file, and optionally play it back.
+
+        Args:
+            text: The text to synthesize.
+            play_audio: If ``True`` (default), also play audio via pygame.
+                Set to ``False`` to silently generate and save only
+                (e.g. for Anki card audio attachment).
+        """
+        logger.info("EdgeTTS.speak() called: text=%s play_audio=%r", text[:50], play_audio)
         if not self._enabled or not text:
             logger.info("EdgeTTS.speak() skipped: enabled=%s text=%s", self._enabled, bool(text))
             return
-        if self._lock.locked():
-            logger.info("EdgeTTS.speak() skipped: lock is held")
-            return  # skip if already speaking
         try:
             import edge_tts
             import pygame
@@ -48,12 +56,26 @@ class EdgeTTS:
                     if chunk["type"] == "audio":
                         audio_bytes += chunk["data"]
                 if audio_bytes:
-                    logger.info("EdgeTTS.speak() got %d bytes, playing...", len(audio_bytes))
-                    pygame.mixer.music.load(io.BytesIO(audio_bytes))
-                    pygame.mixer.music.play()
-                    while pygame.mixer.music.get_busy():
-                        await asyncio.sleep(0.1)
-                    logger.info("EdgeTTS.speak() playback complete")
+                    logger.info("EdgeTTS.speak() got %d bytes", len(audio_bytes))
+                    # Save audio to temp file (always — for Anki attachment)
+                    try:
+                        fd, path = tempfile.mkstemp(suffix=".mp3", prefix="desktopocr_anki_")
+                        with os.fdopen(fd, "wb") as f:
+                            f.write(audio_bytes)
+                        self.last_audio_path = path
+                        logger.info("EdgeTTS.speak() saved audio to %s", path)
+                    except Exception as exc:
+                        logger.warning("EdgeTTS.speak() failed to save audio: %s", exc)
+                    # Play audio via pygame (only when requested)
+                    if play_audio:
+                        try:
+                            pygame.mixer.music.load(io.BytesIO(audio_bytes))
+                            pygame.mixer.music.play()
+                            while pygame.mixer.music.get_busy():
+                                await asyncio.sleep(0.1)
+                            logger.info("EdgeTTS.speak() playback complete")
+                        except Exception as exc:
+                            logger.warning("EdgeTTS.speak() playback failed: %s", exc)
                 else:
                     logger.warning("EdgeTTS.speak() no audio received")
             except Exception as exc:

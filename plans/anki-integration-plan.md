@@ -70,7 +70,7 @@ Logic flow:
 
 **Config keys (from settings):**
 - `anki_deck` (str, default `"DesktopOCR"`)
-- `anki_tags` (str, default `"japanese vn"`)
+- `anki_tags` (str, default `"japanese, vn"`)
 - `anki_front` (str, one of `"screenshot"`, `"screenshot_selection"`, `"selection_only"`)
 - `anki_back` (str, one of `"full_with_context"`, `"selection_only"`, `"full_only"`)
 - `anki_audio_side` (str, one of `"front"`, `"back"`, `"both"`)
@@ -86,7 +86,7 @@ Logic flow:
 "anki_host": "localhost",
 "anki_port": 8765,
 "anki_deck": "DesktopOCR",
-"anki_tags": "japanese vn",
+"anki_tags": "japanese, vn",
 "anki_front": "screenshot",
 "anki_back": "full_with_context",
 "anki_audio_side": "front",
@@ -179,7 +179,7 @@ anki_auto_translate_changed = pyqtSignal(bool)
 **Add collapsible "Anki Integration" section** (after Translation Options or AI Enhancements):
 - Enable toggle: On/Off buttons → `anki_enabled_changed`
 - Deck name: `QLineEdit` with placeholder "DesktopOCR" → `anki_deck_changed`
-- Tags: `QLineEdit` with placeholder "japanese vn" → `anki_tags_changed`
+- Tags: `QLineEdit` with placeholder "japanese, vn" → `anki_tags_changed`
 - Front content: `QComboBox` with options "Screenshot only", "Screenshot + Selection", "Selection text only" → `anki_front_changed`
 - Back content: `QComboBox` with options "Full text + Context", "Selection only", "Full text only" → `anki_back_changed`
 - Audio placement: `QComboBox` with options "Front", "Back", "Both" → `anki_audio_side_changed`
