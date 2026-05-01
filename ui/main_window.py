@@ -278,8 +278,11 @@ class MainWindow(QMainWindow):
 
     # --- Public API for main.py ---
 
-    def set_anki_available(self, available: bool) -> None:
-        self.transcription_tray.set_anki_available(available)
+    def set_anki_available(self, available: bool, last_error: str | None = None) -> None:
+        self.transcription_tray.set_anki_available(available, last_error)
+
+    def set_anki_visible(self, visible: bool) -> None:
+        self.transcription_tray.set_anki_visible(visible)
 
     def get_ocr_text(self) -> str:
         return self.transcription_tray.get_ocr_text()

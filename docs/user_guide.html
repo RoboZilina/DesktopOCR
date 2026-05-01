@@ -188,6 +188,88 @@
   </div>
 
   <div class="section">
+    <h2>Anki Integration</h2>
+    <p>
+      DesktopOCR can save OCR results directly to <strong>Anki</strong> flashcards
+      via the <strong>AnkiConnect</strong> add-on. Each card captures the full pipeline:
+      recognized text, translation, screenshot, and optional TTS audio.
+    </p>
+
+    <h3>Prerequisites</h3>
+    <ol>
+      <li><strong>Anki</strong> must be installed and <strong>running</strong>.</li>
+      <li>
+        Install the <strong>AnkiConnect</strong> add-on:
+        <em>Tools → Add-ons → Get Add-ons</em> → enter code
+        <code>2055492159</code> → restart Anki.
+      </li>
+    </ol>
+
+    <h3>Quick Start</h3>
+    <ol>
+      <li>Open the side menu → expand <strong>Anki Integration</strong>.</li>
+      <li>Toggle <strong>Enable Anki</strong> on.</li>
+      <li>
+        Click <strong>Test Connection</strong> to verify AnkiConnect is reachable.
+        The app also polls every 30 seconds automatically.
+      </li>
+      <li>
+        Capture some text, optionally select a passage, trigger translation,
+        then click <strong>🃏</strong> to save the card.
+      </li>
+    </ol>
+
+    <h3>Side Menu Settings</h3>
+    <div class="grid">
+      <div class="card">
+        <span class="pill">Host / Port</span>
+        <p>Defaults to <code>localhost:8765</code>. Only change if you configured a custom port in AnkiConnect's own settings.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Deck Name</span>
+        <p>The target Anki deck. Created automatically if it doesn't exist. Default: <code>DesktopOCR</code>.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Tags</span>
+        <p>Comma-separated tags attached to every card. Default: <code>japanese vn</code>.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Front Template</span>
+        <p>Controls what shows on the card front: screenshot, selection text, or both.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Back Template</span>
+        <p>Controls what shows on the card back: full context, selection only, or OCR text only.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Audio Side</span>
+        <p>Which card side gets TTS audio playback: front, back, or both.</p>
+      </div>
+      <div class="card">
+        <span class="pill">Auto-translate</span>
+        <p>When on, translations are fetched silently in the background when you click 🃏. Falls back to the displayed translation if the API call fails.</p>
+      </div>
+    </div>
+
+    <h3>Card Structure</h3>
+    <p>Each Anki note uses the auto-created <strong>DesktopOCR</strong> note type with 7 fields:</p>
+    <ul>
+      <li><strong>Front</strong> — rendered HTML with screenshot/text based on your template choice</li>
+      <li><strong>Back</strong> — rendered HTML with context/translation based on your template choice</li>
+      <li><strong>TargetText</strong> — raw OCR text</li>
+      <li><strong>TargetTranslation</strong> — translated OCR text</li>
+      <li><strong>ContextText</strong> — selected/highlighted text</li>
+      <li><strong>ContextTranslation</strong> — translation of selected text</li>
+      <li><strong>Screenshot</strong> — full-window screenshot as a base64-embedded image</li>
+    </ul>
+    <p>Audio (if available) is attached as a separate media file linked from the card side chosen in settings.</p>
+
+    <p style="color:#fbbf24;font-weight:bold;">
+      ⚠ Anki must be running for AnkiConnect to respond. The 🃏 button is always clickable when visible; if AnkiConnect is unreachable a dialog explains the issue.
+    </p>
+  </div>
+
+  <div class="section">
     <h2>Keyboard & Tips</h2>
     <ul>
       <li><strong>Ctrl+C</strong> copies the current tray text when Auto-Copy is disabled.</li>

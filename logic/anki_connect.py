@@ -28,34 +28,40 @@ class AnkiConnect:
 
     def __init__(self, host: str = "localhost", port: int = 8765) -> None:
         self._base_url = f"http://{host}:{port}"
-        self._session: Any | None = None
+        self.last_error: str | None = None
+        self._last_error_lock = asyncio.Lock()
+        self._consecutive_failures: int = 0
+
+    async def _set_error(self, msg: str) -> None:
+        async with self._last_error_lock:
+            self.last_error = msg
+
+    async def _clear_error(self) -> None:
+        async with self._last_error_lock:
+            self.last_error = None
+            self._consecutive_failures = 0
 
     # ------------------------------------------------------------------
     # Session management
     # ------------------------------------------------------------------
 
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if _HAS_AIOHTTP:
-            if self._session is None or self._session.closed:
-                self._session = aiohttp.ClientSession()
-            return self._session
-        return None  # type: ignore[return-value]
-
     async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
-            self._session = None
+        """No persistent session to close — sessions are created per-request."""
+        pass
 
     # ------------------------------------------------------------------
     # Low-level request
     # ------------------------------------------------------------------
 
     async def _request(self, action: str, params: dict | None = None, *,
-                       timeout: float = 10.0) -> dict[str, Any] | None:
+                       timeout: float = 10.0, quiet: bool = False) -> dict[str, Any] | None:
         """POST a JSON-RPC request to AnkiConnect and return the response dict.
 
         Returns ``None`` on any failure (connection error, timeout, non-JSON
         response, or an error field in the response).
+
+        When *quiet* is ``True``, connection-level errors are logged at DEBUG
+        instead of WARNING (used by periodic availability polls).
         """
         payload = {
             "action": action,
@@ -65,31 +71,42 @@ class AnkiConnect:
         body = json.dumps(payload, ensure_ascii=False)
 
         if _HAS_AIOHTTP:
-            return await self._request_aiohttp(body, timeout)
-        return await self._request_urllib(body, timeout)
+            return await self._request_aiohttp(body, timeout, quiet=quiet)
+        return await self._request_urllib(body, timeout, quiet=quiet)
 
-    async def _request_aiohttp(self, body: str, timeout: float) -> dict[str, Any] | None:
-        session = await self._get_session()
-        try:
-            async with session.post(
-                self._base_url,
-                data=body,
-                headers={"Content-Type": "application/json"},
-                timeout=aiohttp.ClientTimeout(total=timeout),
-            ) as resp:
-                if resp.status != 200:
-                    logger.warning("[Anki] HTTP %d from %s", resp.status, self._base_url)
-                    return None
-                data = await resp.json()
-                if "error" in data and data["error"] is not None:
-                    logger.warning("[Anki] Error in '%s': %s", json.loads(body)["action"], data["error"])
-                    return None
-                return data
-        except (asyncio.TimeoutError, aiohttp.ClientError, json.JSONDecodeError) as exc:
-            logger.warning("[Anki] Request failed: %s", exc)
-            return None
+    async def _request_aiohttp(self, body: str, timeout: float, *,
+                               quiet: bool = False) -> dict[str, Any] | None:
+        # Create a fresh session per request to avoid connection-pool reuse
+        # issues with AnkiConnect's HTTP server (which may close keep-alive
+        # connections between requests).
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    self._base_url,
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    timeout=aiohttp.ClientTimeout(total=timeout),
+                ) as resp:
+                    if resp.status != 200:
+                        logger.warning("[Anki] HTTP %d from %s", resp.status, self._base_url)
+                        return None
+                    data = await resp.json()
+                    if "error" in data and data["error"] is not None:
+                        logger.warning("[Anki] Error in '%s': %s", json.loads(body)["action"], data["error"])
+                        return None
+                    return data
+            except (asyncio.TimeoutError, aiohttp.ClientError, OSError, ConnectionRefusedError) as exc:
+                if quiet:
+                    logger.debug("[Anki] Poll failed: %s", exc)
+                else:
+                    logger.warning("[Anki] Request failed: %s", exc)
+                return None
+            except json.JSONDecodeError as exc:
+                logger.warning("[Anki] JSON decode error: %s", exc)
+                return None
 
-    async def _request_urllib(self, body: str, timeout: float) -> dict[str, Any] | None:
+    async def _request_urllib(self, body: str, timeout: float, *,
+                              quiet: bool = False) -> dict[str, Any] | None:
         """Fallback using urllib.request wrapped in a thread-pool executor."""
         import urllib.request  # noqa: PLC0415
 
@@ -113,8 +130,20 @@ class AnkiConnect:
                         )
                         return None
                     return data
-            except (OSError, json.JSONDecodeError) as exc:
-                logger.warning("[Anki] Request failed: %s", exc)
+            except urllib.error.URLError as exc:
+                if quiet:
+                    logger.debug("[Anki] Poll failed: %s", exc)
+                else:
+                    logger.warning("[Anki] Request failed: %s", exc)
+                return None
+            except (OSError, TimeoutError) as exc:
+                if quiet:
+                    logger.debug("[Anki] Poll failed: %s", exc)
+                else:
+                    logger.warning("[Anki] Request failed: %s", exc)
+                return None
+            except json.JSONDecodeError as exc:
+                logger.warning("[Anki] JSON decode error: %s", exc)
                 return None
 
         return await loop.run_in_executor(None, _sync_post)
@@ -128,11 +157,17 @@ class AnkiConnect:
 
         Returns ``True`` if the ``version`` action returns a numeric result.
         """
-        data = await self._request("version", timeout=2.0)
+        data = await self._request("version", timeout=2.0, quiet=True)
         if data is None:
+            self._consecutive_failures += 1
+            await self._set_error("Anki is not running")
             return False
         result = data.get("result")
-        return isinstance(result, (int, float))
+        if isinstance(result, (int, float)):
+            await self._clear_error()
+            return True
+        await self._set_error("Anki is not running")
+        return False
 
     async def ensure_deck(self, deck_name: str) -> bool:
         """Create the deck *deck_name* if it does not already exist.
@@ -140,7 +175,11 @@ class AnkiConnect:
         Returns ``True`` on success (deck exists or was created).
         """
         data = await self._request("createDeck", {"deck": deck_name})
-        return data is not None
+        if data is not None:
+            await self._clear_error()
+            return True
+        await self._set_error(f"Failed to create deck '{deck_name}'")
+        return False
 
     async def ensure_note_type(self) -> bool:
         """Ensure the ``DesktopOCR`` note type (model) exists.
@@ -151,9 +190,11 @@ class AnkiConnect:
         # Check if model already exists
         data = await self._request("modelNames")
         if data is None:
+            await self._set_error("Failed to create DesktopOCR note type")
             return False
         models: list[str] = data.get("result") or []
         if "DesktopOCR" in models:
+            await self._clear_error()
             return True
 
         # Create the model
@@ -188,8 +229,10 @@ class AnkiConnect:
         })
         if data is not None:
             logger.info("[Anki] Created note type 'DesktopOCR'")
+            await self._clear_error()
             return True
         logger.warning("[Anki] Failed to create note type 'DesktopOCR'")
+        await self._set_error("Failed to create DesktopOCR note type")
         return False
 
     async def add_note(
@@ -227,11 +270,16 @@ class AnkiConnect:
 
         data = await self._request("addNote", {"note": note})
         if data is None:
+            if self.last_error is None:
+                await self._set_error("Card save failed")
+            return None
+        error_text = data.get("error")
+        if error_text is not None:
+            short_error = str(error_text)[:80]
+            await self._set_error(f"Anki rejected the card: {short_error}")
             return None
         result = data.get("result")
-        if isinstance(result, int):
-            return result
-        # AnkiConnect may return a float for note IDs on some versions
-        if isinstance(result, float):
+        if isinstance(result, (int, float)):
+            await self._clear_error()
             return int(result)
         return None

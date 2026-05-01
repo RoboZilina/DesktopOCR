@@ -20,9 +20,18 @@
   "openai_validator_enabled": false,
   "openai_api_key": "",
   "openai_model": "gpt-4o-mini",
-  "deepseek_validator_enabled": true,
+  "deepseek_validator_enabled": false,
   "deepseek_api_key": "sk-c433f7a354284ca3af09bd71c3eee7ca",
   "deepseek_model": "deepseek-chat",
   "google_vision_enabled": false,
-  "google_vision_api_key": ""
+  "google_vision_api_key": "",
+  "anki_enabled": true,
+  "anki_host": "localhost",
+  "anki_port": 8765,
+  "anki_deck": "DesktopOCR",
+  "anki_tags": "japanese vn",
+  "anki_front": "selection_only",
+  "anki_back": "full_with_context",
+  "anki_audio_side": "front",
+  "anki_auto_translate": true
 }

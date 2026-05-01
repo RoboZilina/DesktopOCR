@@ -33,3 +33,24 @@ Both passes can be enabled independently. When both are active:
 - **Background tints** show kanji category
 
 These layers are independent and stack safely.
+
+## Anki Integration
+
+DesktopOCR can save OCR results (text, translation, screenshot, TTS audio) to [Anki](https://apps.ankiweb.net/) flashcards via the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on.
+
+### Prerequisites
+
+1. **Anki** installed and **running**
+2. **AnkiConnect** add-on installed (Tools → Add-ons → Get Add-ons → code `2055492159`)
+
+### Quick Start
+
+1. Open the side menu → **Anki Integration** section
+2. Toggle **Enable Anki** on
+3. Click **Test Connection** to verify AnkiConnect is reachable (the app also polls every 30s)
+4. Get an OCR result, optionally select text and trigger translation
+5. Click **🃏 Anki** to save a card to the `DesktopOCR` deck
+
+Default host: `localhost`, port: `8765`, deck: `DesktopOCR`.
+
+> **Note:** Anki must be running for AnkiConnect to respond. The 🃏 button is always clickable when visible; if AnkiConnect is unreachable a dialog explains the issue.

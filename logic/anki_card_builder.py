@@ -45,22 +45,33 @@ async def build_and_send_card(
         ``True`` if the card was saved successfully, ``False`` otherwise.
     """
     # ------------------------------------------------------------------
-    # 1. Grab full-window screenshot
+    # 1. Grab full-window screenshot (with retry)
     # ------------------------------------------------------------------
     screenshot_b64: str | None = None
-    try:
-        full_frame = await capture.get_frame(full=True)
-        if full_frame is not None:
-            success, buf = cv2.imencode(".png", full_frame)
-            if success:
-                screenshot_b64 = base64.b64encode(buf).tobytes().decode("ascii")
-    except Exception:  # noqa: BLE001
-        logger.warning("[Anki] Screenshot capture failed, continuing without it")
+    for _attempt in range(3):
+        try:
+            full_frame = await capture.get_frame(full=True, force=True)
+            if full_frame is not None:
+                success, buf = cv2.imencode(".png", full_frame)
+                if success:
+                    screenshot_b64 = base64.b64encode(buf).tobytes().decode("ascii")
+                    break  # success, exit retry loop
+        except Exception:  # noqa: BLE001
+            pass
+        # Brief pause before retry — lets the frame pool settle
+        await asyncio.sleep(0.1)
+    else:
+        logger.warning("[Anki] Screenshot capture failed after 3 attempts, continuing without it")
 
     # ------------------------------------------------------------------
     # 2. Determine target text
     # ------------------------------------------------------------------
     target_text = (selection_text or "").strip() or (ocr_text or "").strip()
+
+    # Empty-text guard — reject card creation when there is nothing to study.
+    if not target_text:
+        logger.warning("[Anki] No target text available, skipping card creation")
+        return False
 
     # ------------------------------------------------------------------
     # 3. Build fields dict
@@ -82,7 +93,13 @@ async def build_and_send_card(
     # 4. Build front HTML
     # ------------------------------------------------------------------
     front_mode = config.get("anki_front", "screenshot")
-    if front_mode == "screenshot":
+
+    # When screenshot is unavailable, fall back to text-only front templates
+    # so the card is still usable for study.
+    if not screenshot_b64 and front_mode in ("screenshot", "screenshot_selection"):
+        logger.info("[Anki] Screenshot unavailable, falling back to text-only front")
+        front_html = "<div class='target'>{TargetText}</div>"
+    elif front_mode == "screenshot":
         front_html = "{Screenshot}"
     elif front_mode == "screenshot_selection":
         front_html = "{Screenshot}<br><div class='target'>{TargetText}</div>"
@@ -187,6 +204,10 @@ async def build_and_send_card(
     try:
         if not await anki.ensure_deck(deck_name):
             logger.warning("[Anki] Failed to ensure deck '%s'", deck_name)
+            return False
+
+        if not await anki.ensure_note_type():
+            logger.warning("[Anki] Failed to ensure note type 'DesktopOCR'")
             return False
 
         note_id = await anki.add_note(

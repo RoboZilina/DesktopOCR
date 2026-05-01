@@ -106,9 +106,9 @@ class TranscriptionTray(QWidget):
         self._anki_btn = QPushButton("🃏 Anki")
         self._anki_btn.setFixedHeight(28)
         self._anki_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self._anki_btn.setCursor(Qt.CursorShape.ArrowCursor)
-        self._anki_btn.clicked.connect(lambda: self.anki_requested.emit())
-        self._anki_btn.setEnabled(False)  # disabled until AnkiConnect is reachable
+        self._anki_btn.clicked.connect(self._on_anki_clicked)
+        self._anki_available = False
+        self._anki_last_error: str | None = None
         self._primary_buttons.append(self._anki_btn)
         ocr_header.addWidget(self._anki_btn)
         layout.addLayout(ocr_header)
@@ -340,7 +340,6 @@ class TranscriptionTray(QWidget):
             "}"
             f"QPushButton:hover {{ background: {hover}; margin-top: -1px; margin-bottom: 1px; }}"
             f"QPushButton:pressed {{ background: {pressed}; margin-top: 0px; margin-bottom: 0px; }}"
-            "QPushButton:disabled { opacity: 0.6; margin-top: 0px; margin-bottom: 0px; }"
         )
         for btn in getattr(self, '_primary_buttons', []):
             btn.setStyleSheet(style)
@@ -357,9 +356,28 @@ class TranscriptionTray(QWidget):
     def get_selection_translation(self) -> str:
         return self._trans_text.toPlainText()
 
-    def set_anki_available(self, available: bool) -> None:
-        """Enable/disable the Anki button based on AnkiConnect reachability."""
-        self._anki_btn.setEnabled(available)
+    def set_anki_available(self, available: bool, last_error: str | None = None) -> None:
+        """Update the Anki button's availability state and tooltip."""
+        self._anki_available = available
+        self._anki_last_error = last_error
+        self._anki_btn.setToolTip(
+            "Save to Anki" if available else (last_error or "Anki is not running")
+        )
+
+    def _on_anki_clicked(self) -> None:
+        """Handle Anki button click — show message box if Anki is unavailable."""
+        if not self._anki_available:
+            QMessageBox.information(
+                self,
+                "Anki Not Available",
+                self._anki_last_error or "Anki is not running.\nStart Anki and try again.",
+            )
+            return
+        self.anki_requested.emit()
+
+    def set_anki_visible(self, visible: bool) -> None:
+        """Show/hide the Anki button based on side menu configuration."""
+        self._anki_btn.setVisible(visible)
 
     def _apply_token_highlighting(self, widget: QTextEdit, text: str) -> None:
         if not text:

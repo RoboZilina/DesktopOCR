@@ -46,6 +46,7 @@ class SideMenu(QWidget):
     anki_back_changed            = pyqtSignal(str)
     anki_audio_side_changed      = pyqtSignal(str)
     anki_auto_translate_changed  = pyqtSignal(bool)
+    anki_test_requested          = pyqtSignal()
     reset_requested          = pyqtSignal()
     hide_requested           = pyqtSignal()
     user_guide_requested     = pyqtSignal()
@@ -371,9 +372,39 @@ class SideMenu(QWidget):
         )
 
         anki_layout.addWidget(self._create_section_header("Anki"))
+        _anki_help_html = (
+            "<h3 style='margin-top:0;color:#7dd3fc;'>Anki Integration</h3>"
+            "<p>DesktopOCR can save OCR results directly to <strong>Anki</strong> "
+            "flashcards via the <strong>AnkiConnect</strong> add-on.</p>"
+            "<p><strong>Prerequisites:</strong></p>"
+            "<ul>"
+            "<li><strong>Anki</strong> must be installed <strong>and running</strong>.</li>"
+            "<li>Install <strong>AnkiConnect</strong> (Tools → Add-ons → Get Add-ons"
+            " → code <code>2055492159</code>). Restart Anki after installing.</li>"
+            "</ul>"
+            "<p><strong>How it works:</strong></p>"
+            "<ol>"
+            "<li>Enable Anki in this menu.</li>"
+            "<li>The 🃏 Anki button lights up once AnkiConnect is detected (polled every 30s).</li>"
+            "<li>Click 🃏 to send OCR text, translation, screenshot, and audio to a new card.</li>"
+            "</ol>"
+            "<p><strong>Settings:</strong></p>"
+            "<ul>"
+            "<li><strong>Host / Port</strong> — AnkiConnect runs on localhost:8765 by default.</li>"
+            "<li><strong>Deck Name</strong> — Saved cards go here. Created automatically.</li>"
+            "<li><strong>Tags</strong> — Comma-separated tags on each card (default: japanese vn).</li>"
+            "<li><strong>Front / Back Templates</strong> — Which content appears on each side.</li>"
+            "<li><strong>Audio Side</strong> — Attach TTS audio to front, back, or both.</li>"
+            "<li><strong>Auto-translate</strong> — Silently fetches translations when you click 🃏.</li>"
+            "</ul>"
+            "<p style='color:#fbbf24;font-weight:bold;'>"
+            "⚠ Make sure Anki is running. AnkiConnect only responds while Anki is open.</p>"
+        )
         self._anki_toggle = self._add_toggle_section(
             anki_layout, "Enable Anki",
             self.anki_enabled_changed, default=False,
+            help_text="Click for AnkiConnect setup & usage instructions",
+            help_html=_anki_help_html,
         )
 
         anki_layout.addWidget(self._create_section_header("Host"))
@@ -407,6 +438,12 @@ class SideMenu(QWidget):
             lambda: self.anki_tags_changed.emit(self._anki_tags_edit.text().strip())
         )
         anki_layout.addWidget(self._anki_tags_edit)
+
+        # Test Connection button
+        _test_btn = QPushButton("Test Connection")
+        _test_btn.setProperty("menuClass", "option-btn")
+        _test_btn.clicked.connect(lambda: self.anki_test_requested.emit())
+        anki_layout.addWidget(_test_btn)
 
         anki_layout.addWidget(self._create_section_header("Front Template"))
         self._anki_front_combo = QComboBox()

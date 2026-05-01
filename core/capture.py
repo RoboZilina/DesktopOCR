@@ -342,16 +342,18 @@ class ScreenCapture:
         """Read-only view of the current capture region (x, y, w, h) or None."""
         return self._region
 
-    async def get_frame(self, full: bool = False) -> Optional[np.ndarray]:
+    async def get_frame(self, full: bool = False, force: bool = False) -> Optional[np.ndarray]:
         """
         Capture one frame, run frame-diff check, optionally crop to region, return BGR ndarray.
 
         Args:
             full: If True, return the entire window frame without region cropping.
                   Diff check still applies. OCR pipeline uses full=False (cropped).
+            force: If True, skip the MD5 frame-diff check and always return the frame.
+                   Used by the Anki screenshot path to guarantee a fresh capture.
 
         Returns None if:
-          - The frame is identical to the last captured frame (MD5 match)
+          - The frame is identical to the last captured frame (MD5 match, force=False)
           - The capture hardware fails
           - stop() has already been called
         Never raises — all exceptions are caught and logged.
@@ -361,8 +363,8 @@ class ScreenCapture:
 
         try:
             if self._use_bitblt:
-                return await self._get_frame_bitblt(full=full)
-            return await self._get_frame_winrt(full=full)
+                return await self._get_frame_bitblt(full=full, force=force)
+            return await self._get_frame_winrt(full=full, force=force)
         except Exception as exc:
             log.error("get_frame error: %s", exc, exc_info=True)
             return None
@@ -602,22 +604,22 @@ class ScreenCapture:
     # BitBlt fallback
     # ------------------------------------------------------------------
 
-    async def _get_frame_bitblt(self, full: bool = False) -> Optional[np.ndarray]:
+    async def _get_frame_bitblt(self, full: bool = False, force: bool = False) -> Optional[np.ndarray]:
         """Run _capture_bitblt in a thread-pool executor (blocking GDI call)."""
         loop = asyncio.get_running_loop()
         raw_frame = await loop.run_in_executor(None, _capture_bitblt, self._hwnd)
         if raw_frame is None:
             return None
-        return self._apply_diff_and_crop(raw_frame, full=full)
+        return self._apply_diff_and_crop(raw_frame, full=full, force=force)
 
     # ------------------------------------------------------------------
     # Shared post-processing: diff check + region crop
     # ------------------------------------------------------------------
 
-    def _apply_diff_and_crop(self, frame: np.ndarray, full: bool = False) -> Optional[np.ndarray]:
+    def _apply_diff_and_crop(self, frame: np.ndarray, full: bool = False, force: bool = False) -> Optional[np.ndarray]:
         """
         1. Crop to self._region if set and full=False.
-        2. MD5 frame diff check on the cropped region — skip identical captures.
+        2. MD5 frame diff check on the cropped region — skip identical captures (unless force=True).
         3. Update self.last_frame_hash with the new hash and return the cropped/full frame.
         """
         target = frame
@@ -632,6 +634,11 @@ class ScreenCapture:
             rw = max(1, min(rw, w - rx))
             rh = max(1, min(rh, h - ry))
             target = frame[ry:ry + rh, rx:rx + rw]
+
+        # When force=True, skip the MD5 frame-diff check entirely.
+        # Used by the Anki screenshot path to guarantee a fresh capture.
+        if force:
+            return target
 
         # Frame diff — mirrors the pattern from instructions.md / capture_pipeline.js
         new_hash = hashlib.md5(target.tobytes()).hexdigest()
