@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class AnkiConnect:
     def __init__(self, host: str = "localhost", port: int = 8765) -> None:
         self._base_url = f"http://{host}:{port}"
         self.last_error: str | None = None
-        self._last_error_lock = asyncio.Lock()
+        self._last_error_lock = threading.Lock()
 
     def set_host_port(self, host: str, port: int) -> None:
         """Update the AnkiConnect endpoint without creating a new client instance."""
@@ -40,12 +41,12 @@ class AnkiConnect:
         """Return the current AnkiConnect endpoint URL."""
         return self._base_url
 
-    async def _set_error(self, msg: str) -> None:
-        async with self._last_error_lock:
+    def _set_error(self, msg: str) -> None:
+        with self._last_error_lock:
             self.last_error = msg
 
-    async def _clear_error(self) -> None:
-        async with self._last_error_lock:
+    def _clear_error(self) -> None:
+        with self._last_error_lock:
             self.last_error = None
 
     # ------------------------------------------------------------------
@@ -96,14 +97,14 @@ class AnkiConnect:
                 ) as resp:
                     if resp.status != 200:
                         logger.warning("[Anki] HTTP %d from %s", resp.status, self._base_url)
-                        await self._set_error(f"HTTP {resp.status} from AnkiConnect")
+                        self._set_error(f"HTTP {resp.status} from AnkiConnect")
                         return None
                     data = await resp.json()
                     if "error" in data and data["error"] is not None:
-                        error_text = str(data["error"])[:80]
-                        logger.warning("[Anki] Error in '%s': %s", json.loads(body)["action"], error_text)
                         action = json.loads(body).get("action", "unknown")
-                        await self._set_error(f"Anki rejected '{action}': {error_text}")
+                        error_text = str(data["error"])[:80]
+                        logger.warning("[Anki] Error in '%s': %s", action, error_text)
+                        self._set_error(f"Anki rejected '{action}': {error_text}")
                         return None
                     return data
             except (asyncio.TimeoutError, aiohttp.ClientError, OSError) as exc:
@@ -111,7 +112,7 @@ class AnkiConnect:
                     logger.debug("[Anki] Poll failed: %s", exc)
                 else:
                     logger.warning("[Anki] Request failed: %s", exc)
-                await self._set_error(f"Transport error: {exc}")
+                self._set_error(f"Transport error: {exc}")
                 return None
             except json.JSONDecodeError as exc:
                 logger.warning("[Anki] JSON decode error: %s", exc)
@@ -121,15 +122,10 @@ class AnkiConnect:
                               quiet: bool = False) -> dict[str, Any] | None:
         """Fallback using urllib.request wrapped in a thread-pool executor.
 
-        Thread-safety note: _sync_post runs in a thread-pool executor
-        (run_in_executor), which is the only path where ``self.last_error`` is
-        assigned without holding ``self._lock``. This is safe because:
-        1. ``_request()`` selects exactly one transport — aiohttp XOR urllib.
-        2. ``_sync_post`` executes sequentially within its thread, with no
-           concurrent coroutine access to ``self.last_error``.
-        3. The GIL prevents simultaneous writes from Python threads.
-        The async lock is only needed for the aiohttp path where multiple
-        coroutines could interleave.
+        Thread-safety note: ``_sync_post`` runs in a thread-pool executor
+        (``run_in_executor``). All ``self.last_error`` assignments go through
+        ``_set_error`` / ``_clear_error`` which are protected by a
+        ``threading.Lock``, safe for both coroutine and thread-pool access.
         """
         import urllib.request  # noqa: PLC0415
 
@@ -146,16 +142,14 @@ class AnkiConnect:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if "error" in data and data["error"] is not None:
+                        action = json.loads(body).get("action", "unknown")
                         error_text = str(data["error"])[:80]
                         logger.warning(
                             "[Anki] Error in '%s': %s",
-                            json.loads(body)["action"],
+                            action,
                             error_text,
                         )
-                        action = json.loads(body).get("action", "unknown")
-                        # Direct assignment safe here — _sync_post runs in a
-                        # thread-pool executor and no concurrent coroutine access.
-                        self.last_error = f"Anki rejected '{action}': {error_text}"
+                        self._set_error(f"Anki rejected '{action}': {error_text}")
                         return None
                     return data
             except urllib.error.URLError as exc:
@@ -163,18 +157,14 @@ class AnkiConnect:
                     logger.debug("[Anki] Poll failed: %s", exc)
                 else:
                     logger.warning("[Anki] Request failed: %s", exc)
-                # Direct assignment safe here — _sync_post runs in a
-                # thread-pool executor and no concurrent coroutine access.
-                self.last_error = f"Transport error: {exc}"
+                self._set_error(f"Transport error: {exc}")
                 return None
             except (OSError, TimeoutError) as exc:
                 if quiet:
                     logger.debug("[Anki] Poll failed: %s", exc)
                 else:
                     logger.warning("[Anki] Request failed: %s", exc)
-                # Direct assignment safe here — _sync_post runs in a
-                # thread-pool executor and no concurrent coroutine access.
-                self.last_error = f"Transport error: {exc}"
+                self._set_error(f"Transport error: {exc}")
                 return None
             except json.JSONDecodeError as exc:
                 logger.warning("[Anki] JSON decode error: %s", exc)
@@ -193,13 +183,13 @@ class AnkiConnect:
         """
         data = await self._request("version", timeout=2.0, quiet=True)
         if data is None:
-            await self._set_error("Anki is not running")
+            self._set_error("Anki is not running")
             return False
         result = data.get("result")
         if isinstance(result, (int, float)):
-            await self._clear_error()
+            self._clear_error()
             return True
-        await self._set_error("Anki is not running")
+        self._set_error("Anki is not running")
         return False
 
     async def ensure_deck(self, deck_name: str) -> bool:
@@ -209,9 +199,9 @@ class AnkiConnect:
         """
         data = await self._request("createDeck", {"deck": deck_name})
         if data is not None:
-            await self._clear_error()
+            self._clear_error()
             return True
-        await self._set_error(f"Failed to create deck '{deck_name}'")
+        self._set_error(f"Failed to create deck '{deck_name}'")
         return False
 
     async def ensure_note_type(self) -> bool:
@@ -223,11 +213,11 @@ class AnkiConnect:
         # Check if model already exists
         data = await self._request("modelNames")
         if data is None:
-            await self._set_error("Failed to create DesktopOCR note type")
+            self._set_error("Failed to create DesktopOCR note type")
             return False
         models: list[str] = data.get("result") or []
         if "DesktopOCR" in models:
-            await self._clear_error()
+            self._clear_error()
             return True
 
         # Create the model
@@ -262,10 +252,10 @@ class AnkiConnect:
         })
         if data is not None:
             logger.info("[Anki] Created note type 'DesktopOCR'")
-            await self._clear_error()
+            self._clear_error()
             return True
         logger.warning("[Anki] Failed to create note type 'DesktopOCR'")
-        await self._set_error("Failed to create DesktopOCR note type")
+        self._set_error("Failed to create DesktopOCR note type")
         return False
 
     async def add_note(
@@ -310,10 +300,10 @@ class AnkiConnect:
         data = await self._request("addNote", {"note": note})
         if data is None:
             if self.last_error is None:
-                await self._set_error("Card save failed")
+                self._set_error("Card save failed")
             return None
         result = data.get("result")
         if isinstance(result, (int, float)):
-            await self._clear_error()
+            self._clear_error()
             return int(result)
         return None

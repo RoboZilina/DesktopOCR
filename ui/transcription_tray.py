@@ -154,7 +154,9 @@ class TranscriptionTray(QWidget):
         self._translate_btn.setFixedHeight(28)
         self._translate_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._translate_btn.clicked.connect(
-            lambda: self.translate_requested.emit(self._sel_text.toPlainText())
+            lambda: self.translate_requested.emit(
+                self._sel_text.toPlainText() or self._ocr_text.toPlainText()
+            )
         )
         self._primary_buttons.append(self._translate_btn)
         sel_header.addWidget(self._translate_btn)

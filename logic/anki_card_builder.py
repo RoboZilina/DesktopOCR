@@ -85,7 +85,7 @@ async def build_and_send_card(
     # Empty-text guard — reject card creation when there is nothing to study.
     if not target_text:
         logger.warning("[Anki] No target text available, skipping card creation")
-        anki.last_error = "No target text to save"
+        anki._set_error("No target text to save")
         return False
 
     # ------------------------------------------------------------------

@@ -1113,7 +1113,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state["anki_enabled"] = enabled
                 window.set_anki_visible(enabled)
                 if enabled:
-                    anki.last_error = None
+                    anki._clear_error()
                     asyncio.create_task(_check_anki())
                 _do_save()
             window.side_menu.anki_enabled_changed.connect(_on_anki_enabled_changed)
@@ -1121,7 +1121,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             def _on_anki_host_changed(host: str):
                 settings_state["anki_host"] = host
                 anki.set_host_port(host, settings_state.get("anki_port", 8765))
-                anki.last_error = None
+                anki._clear_error()
                 asyncio.create_task(_check_anki())
                 _do_save()
             window.side_menu.anki_host_changed.connect(_on_anki_host_changed)
@@ -1130,7 +1130,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state["anki_port"] = port
                 host = settings_state.get("anki_host", "localhost")
                 anki.set_host_port(host, port)
-                anki.last_error = None
+                anki._clear_error()
                 asyncio.create_task(_check_anki())
                 _do_save()
             window.side_menu.anki_port_changed.connect(_on_anki_port_changed)
