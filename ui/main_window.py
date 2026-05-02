@@ -172,7 +172,9 @@ class MainWindow(QMainWindow):
         )
         self.side_menu.user_guide_requested.connect(self._show_user_guide)
 
-        self._user_guide_path = pathlib.Path("docs/user_guide.html")
+        import sys
+        _base = pathlib.Path(getattr(sys, "_MEIPASS", pathlib.Path(__file__).parent.parent))
+        self._user_guide_path = _base / "docs" / "user_guide.html"
 
         # Detect and apply system theme on startup
         self._detect_and_apply_theme()

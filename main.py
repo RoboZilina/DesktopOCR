@@ -88,6 +88,8 @@ def load_settings() -> dict:
         settings["anki_host"] = "localhost"
     if not isinstance(settings.get("anki_port"), int):
         settings["anki_port"] = 8765
+    if not 1 <= settings.get("anki_port", 8765) <= 65535:
+        settings["anki_port"] = 8765
     if not isinstance(settings.get("anki_deck"), str):
         settings["anki_deck"] = "DesktopOCR"
     if not isinstance(settings.get("anki_tags"), str):
@@ -313,7 +315,10 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
   
     
     settings_state = load_settings()
-    saved_line_count = max(1, min(5, int(settings_state.get("paddle_line_count", 3) or 3)))
+    try:
+        saved_line_count = max(1, min(5, int(settings_state.get("paddle_line_count", 3) or 3)))
+    except (ValueError, TypeError):
+        saved_line_count = 3
     google_vision: GoogleVisionOCR | None = None
 
     def _set_status_message(status_text: str, summary_text: str) -> None:

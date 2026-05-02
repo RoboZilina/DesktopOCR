@@ -1163,6 +1163,9 @@ class SideMenu(QWidget):
         raw = self._anki_port_edit.text().strip()
         try:
             port = int(raw)
+            if port < 1 or port > 65535:
+                port = 8765
+                self._anki_port_edit.setText(str(port))
         except (ValueError, TypeError):
             port = 8765
             # Restore the valid port in the field so the user sees what was applied
