@@ -224,6 +224,10 @@ def crop_box(image: np.ndarray, box: list) -> np.ndarray | None:
     x2 = min(w_img, int(round(x2)))
     y2 = min(h_img, int(round(y2)))
     
+    # If the clamped box has non-positive dimensions, the box is entirely outside the image
+    if x2 <= x1 or y2 <= y1:
+        return None
+    
     w = x2 - x1
     h = y2 - y1
     

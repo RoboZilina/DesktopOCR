@@ -1,7 +1,7 @@
 """WinRT screen capture via Windows.Graphics.Capture — returns numpy BGR frames."""
 
 # Windows only. No cross-platform shims. Period.
-# Requires winsdk==0.10.0 — pin this version; later versions changed the API surface.
+# Requires winsdk==1.0.0b10 — pin this version; later versions changed the API surface.
 
 from __future__ import annotations
 

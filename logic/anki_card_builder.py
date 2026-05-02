@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import html
 import logging
 import os
 import time
@@ -184,8 +185,8 @@ async def build_and_send_card(
         "{ContextTranslation}": fields.get("ContextTranslation", ""),
     }
     for placeholder, value in _subs.items():
-        front_html = front_html.replace(placeholder, value)
-        back_html = back_html.replace(placeholder, value)
+        front_html = front_html.replace(placeholder, html.escape(value))
+        back_html = back_html.replace(placeholder, html.escape(value))
 
     logger.info(
         "[Anki] After substitution: front_html (first 150 chars)='%s', front_html_is_empty=%r",
@@ -289,7 +290,7 @@ async def build_and_send_card(
                 note_id,
             )
             return True
-        logger.warning("[Anki] Card save failed")
+        logger.warning("[Anki] Card not saved (duplicate detected or add_note returned None)")
         return False
     except Exception:  # noqa: BLE001
         logger.warning("[Anki] Card save raised unexpectedly", exc_info=True)

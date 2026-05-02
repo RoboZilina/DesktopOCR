@@ -22,9 +22,12 @@ class EdgeTTS:
         self._lock = asyncio.Lock()
         self._enabled = True
         self.last_audio_path: str | None = None
+        self._last_audio_path: str | None = None
+        self._mixer_available = False
         try:
             import pygame
             pygame.mixer.init()
+            self._mixer_available = True
         except Exception as exc:
             logger.warning("pygame unavailable; Edge TTS audio playback will not work: %s", exc)
 
@@ -57,17 +60,24 @@ class EdgeTTS:
                         audio_bytes += chunk["data"]
                 if audio_bytes:
                     logger.info("EdgeTTS.speak() got %d bytes", len(audio_bytes))
+                    # Clean up previous temp file if it still exists
+                    if self._last_audio_path:
+                        try:
+                            os.unlink(self._last_audio_path)
+                        except OSError:
+                            pass
                     # Save audio to temp file (always — for Anki attachment)
                     try:
                         fd, path = tempfile.mkstemp(suffix=".mp3", prefix="desktopocr_anki_")
                         with os.fdopen(fd, "wb") as f:
                             f.write(audio_bytes)
                         self.last_audio_path = path
+                        self._last_audio_path = path
                         logger.info("EdgeTTS.speak() saved audio to %s", path)
                     except Exception as exc:
                         logger.warning("EdgeTTS.speak() failed to save audio: %s", exc)
                     # Play audio via pygame (only when requested)
-                    if play_audio:
+                    if play_audio and self._mixer_available:
                         try:
                             pygame.mixer.music.load(io.BytesIO(audio_bytes))
                             pygame.mixer.music.play()
@@ -76,6 +86,8 @@ class EdgeTTS:
                             logger.info("EdgeTTS.speak() playback complete")
                         except Exception as exc:
                             logger.warning("EdgeTTS.speak() playback failed: %s", exc)
+                    elif play_audio and not self._mixer_available:
+                        logger.warning("EdgeTTS.speak() playback requested but pygame mixer is not available")
                 else:
                     logger.warning("EdgeTTS.speak() no audio received")
             except Exception as exc:

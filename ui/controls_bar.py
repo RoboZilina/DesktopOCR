@@ -35,6 +35,7 @@ class ControlsBar(QWidget):
     def __init__(self, engines: list[str], parent=None):
         super().__init__(parent)
         self.setFixedHeight(48)
+        self._voice_id_map = {}
         self.setStyleSheet(
             "background: transparent; border-bottom: 1px solid transparent;"
         )

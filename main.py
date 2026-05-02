@@ -79,6 +79,10 @@ def load_settings() -> dict:
                         settings[key] = raw[key]
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning("Failed to load settings: %s", exc)
+    # Allow DEEPSEEK_API_KEY env var to override settings.json value
+    env_key = os.environ.get("DEEPSEEK_API_KEY")
+    if env_key:
+        settings["deepseek_api_key"] = env_key
     if settings.get("text_size") not in ("small", "medium", "large"):
         logging.getLogger(__name__).warning("Invalid text_size '%s', resetting to 'medium'", settings.get("text_size"))
         settings["text_size"] = "medium"
@@ -307,6 +311,17 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
     region_was_cli_defined = bool(args.region or args.select_region)
     selection_ready = (not gui_mode) or region_was_cli_defined
+
+    # Apply DPI scaling to the default region so it works on non-1080p displays
+    try:
+        import ctypes
+        dpi = ctypes.windll.user32.GetDpiForSystem()
+        scale = dpi / 96.0
+        if abs(scale - 1.0) > 0.01:
+            DEFAULT_REGION = tuple(int(v * scale) for v in DEFAULT_REGION)
+            logger.info("DPI scaling applied: %d DPI -> scale=%.2f, region=%s", dpi, scale, DEFAULT_REGION)
+    except Exception:
+        pass  # DPI detection is best-effort; fall back to unscaled default
 
     if selected_region is None:
         selected_region = DEFAULT_REGION
@@ -1503,7 +1518,11 @@ if __name__ == "__main__":
     try:
         from PyQt6.QtWidgets import QApplication, QMessageBox
     except ImportError:
-        from PyQt5.QtWidgets import QApplication, QMessageBox
+        try:
+            from PyQt5.QtWidgets import QApplication, QMessageBox
+        except ImportError:
+            print("ERROR: Install PyQt6: pip install PyQt6")
+            sys.exit(1)
     app = QApplication.instance() or QApplication(sys.argv)
 
     # Resolve HWND: --hwnd flag or GUI picker dialog

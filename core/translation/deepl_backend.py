@@ -4,6 +4,7 @@ Uses the same JSON-RPC endpoint as the DeepL browser extension.
 Rate limits are generous for personal/VN use.
 """
 
+import asyncio
 import logging
 import random
 
@@ -71,18 +72,28 @@ class DeepLBackend(TranslationBackend):
             },
         }
 
-        try:
-            session = self._get_session()
-            async with session.post(
-                _ENDPOINT,
-                json=payload,
-                headers=_HEADERS,
-            ) as resp:
-                if resp.status != 200:
-                    logger.warning(
-                        "[DeepL] HTTP %d from endpoint", resp.status
-                    )
-                    return ""
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                session = self._get_session()
+                async with session.post(
+                    _ENDPOINT,
+                    json=payload,
+                    headers=_HEADERS,
+                ) as resp:
+                    if resp.status == 429:
+                        if attempt < max_retries - 1:
+                            backoff = 2 ** attempt
+                            logger.warning("[DeepL] HTTP 429 (rate limited), retrying in %ds (attempt %d/%d)", backoff, attempt + 1, max_retries)
+                            await asyncio.sleep(backoff)
+                            continue
+                        logger.warning("[DeepL] HTTP 429 — rate limited, all retries exhausted")
+                        return ""
+                    if resp.status != 200:
+                        logger.warning(
+                            "[DeepL] HTTP %d from endpoint", resp.status
+                        )
+                        return ""
 
                 data = await resp.json(content_type=None)
 
@@ -122,12 +133,12 @@ class DeepLBackend(TranslationBackend):
                 )
                 return result
 
-        except aiohttp.ClientError as exc:
-            logger.warning("[DeepL] Network error: %s", exc)
-            return ""
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[DeepL] Unexpected error: %s", exc)
-            return ""
+            except aiohttp.ClientError as exc:
+                logger.warning("[DeepL] Network error: %s", exc)
+                return ""
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[DeepL] Unexpected error: %s", exc)
+                return ""
 
     async def is_available(self) -> bool:
         """Return True if the DeepL endpoint responds with HTTP 200."""
