@@ -77,7 +77,7 @@
     <div class="grid">
       <div class="card">
         <span class="pill">Engine</span>
-        Switch between Paddle variants (pre-tuned for VNs), Windows OCR, or EasyOCR fallback.
+        Switch between Paddle variants (pre-tuned for VNs) or Windows OCR.
       </div>
       <div class="card">
         <span class="pill">Menu</span>
@@ -278,8 +278,23 @@
     </ul>
   </div>
 
+  <div class="section">
+    <h2>Troubleshooting</h2>
+    <ul>
+      <li><strong>Blank translation:</strong> Verify the translation backend is enabled in the side menu and the API key (if required) is set.</li>
+      <li><strong>No OCR output:</strong> Confirm a source window is selected and the capture region covers the text area.</li>
+      <li><strong>Anki connection fails:</strong> Ensure Anki is running and the AnkiConnect add-on is installed.</li>
+      <li><strong>User guide not found:</strong> In PyInstaller builds the guide is bundled inside the executable. Reinstall the application if it fails to open.</li>
+    </ul>
+  </div>
+
+  <div class="section">
+    <h2>Bundled Resource</h2>
+    <p>This user guide is bundled into PyInstaller builds of DesktopOCR. The file <code>docs/user_guide.html</code> is copied into the executable via <code>--add-data</code> during the build process. If the guide does not open from within the application, verify that your installation includes this file.</p>
+  </div>
+
   <p style="color:#9ca3af; font-size:13px;">
-    Last updated: April 2026 — DesktopOCR VN Stable build.
+    Last updated: May 2026 — DesktopOCR pre-release build.
   </p>
 </body>
 </html>

@@ -1,6 +1,13 @@
 # DesktopOCR
 OCR for Japanese language content (Visual novels, Manga etc). 2026 Edition
 
+## What's New in This Release
+- Phase 5 documentation updates — improved user guide, port validation notes, PyInstaller bundling info
+- Zero-risk code cleanup (unused imports removed, PEP8 formatting, invalid QSS removed, tooltips added, `.gitignore` expanded)
+- Pre-release hardening prep (resource path fixes, settings type guards, packaging foundations)
+
+> **Note:** EasyOCR is currently hidden from the engine selector and is not available in this release. Only PaddleOCR and Windows OCR are shown in the UI.
+
 ## Highlighting System
 
 DesktopOCR includes an optional multi-layer highlighting system that helps you quickly identify word frequency and kanji difficulty while reading Japanese text.
@@ -64,7 +71,7 @@ The app auto-creates a **DesktopOCR** note type with 7 fields:
 | Front Template | `screenshot` | Card front: screenshot, screenshot+text, or text-only |
 | Back Template | `full_with_context` | Card back: full context, selection, or OCR-only |
 | Audio Side | `front` | Attach TTS audio to front, back, or both |
-| Auto-translate | `true` | Silently fetch translations when saving a card |
+| Auto-translate | `true` | Silently fetch a translation for the Anki card when saving (not used for in-app translation) |
 
 ### Quick Start
 
@@ -75,3 +82,5 @@ The app auto-creates a **DesktopOCR** note type with 7 fields:
 5. Click **🃏 Anki** to save a card to the `DesktopOCR` deck
 
 > **Note:** Anki must be running for AnkiConnect to respond. The 🃏 button is always clickable when visible; if AnkiConnect is unreachable a dialog explains the issue.
+>
+> **Security note:** The AnkiConnect add-on (`2055492159`) is open-source. You can verify its code on [AnkiWeb](https://ankiweb.net/shared/info/2055492159) or review it locally in Anki's add-ons folder.

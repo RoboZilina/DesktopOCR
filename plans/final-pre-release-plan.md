@@ -6,7 +6,7 @@
 > - ❌ Removed sequential translation concern (already handled in existing code)
 > - All other claims verified against source and retained
 >
-> **✅ Completed 2026-05-02:** Zero-risk cleanup (Phases 2-4 partially) — see checkmarks below
+> **✅ Completed 2026-05-02:** Zero-risk cleanup (Phases 2-4 partially) + Phase 5 documentation (2/3 items) — see checkmarks below
 
 ---
 
@@ -297,18 +297,25 @@ Already covered in Phase 2.2. ✅
 
 ## Phase 5 — Documentation (🟢 Low Risk) [3 items]
 
-### 5.1 Update README
+### 5.1 ✅ Update README
 
-- Clarify Auto-translate is for Anki card creation only
-- Add note about TTS audio attachment to Anki cards
-- Add "verify add-on code on AnkiWeb" note
+- ✅ Clarify Auto-translate is for Anki card creation only
+- ❌ Add note about TTS audio attachment to Anki cards (deferred — no dedicated Anki audio section exists yet)
+- ✅ Add "verify add-on code on AnkiWeb" note
+- ✅ Add "What's New in This Release" section
+- ✅ Add note that EasyOCR is hidden/disabled in this release
 
-### 5.2 Update user_guide.html
+### 5.2 ✅ Update user_guide.html
 
-- Mark EasyOCR as optional (`pip install` if needed)
-- Fix any stale references
+- ✅ Mark EasyOCR as hidden/disabled (not part of this release)
+- ✅ Fix stale EasyOCR reference (line 80 — removed "or EasyOCR fallback")
+- ✅ Add troubleshooting section
+- ✅ Add bundled resource note (PyInstaller)
+- ✅ Update timestamp to May 2026
 
 ### 5.3 Add port validation note to settings documentation
+
+**Skipped — no `docs/settings.md` or equivalent file exists.** Port validation documentation deferred until a settings doc is created.
 
 ---
 
@@ -321,5 +328,5 @@ Already covered in Phase 2.2. ✅
 | 2 — Cleanup | 8 | 6 | 2 (json.loads duplicate, consolidate list_windows) |
 | 3 — Settings | 4 | 3 | 1 (QTimer hygiene, optional) |
 | 4 — Packaging | 3 | 2 | 1 (PyInstaller spec) |
-| 5 — Documentation | 3 | 0 | 3 |
-| **Total** | **24** | **12** | **12** |
+| 5 — Documentation | 3 | 2 | 1 (port validation doc — no settings.md exists) |
+| **Total** | **24** | **14** | **10** |
