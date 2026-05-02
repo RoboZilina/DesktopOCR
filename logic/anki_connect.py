@@ -116,6 +116,7 @@ class AnkiConnect:
                 return None
             except json.JSONDecodeError as exc:
                 logger.warning("[Anki] JSON decode error: %s", exc)
+                self._set_error(f"Invalid JSON from Anki: {str(exc)[:80]}")
                 return None
 
     async def _request_urllib(self, body: str, timeout: float, *,
@@ -168,6 +169,7 @@ class AnkiConnect:
                 return None
             except json.JSONDecodeError as exc:
                 logger.warning("[Anki] JSON decode error: %s", exc)
+                self._set_error(f"Invalid JSON from Anki: {str(exc)[:80]}")
                 return None
 
         return await loop.run_in_executor(None, _sync_post)
