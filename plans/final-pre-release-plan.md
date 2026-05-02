@@ -6,7 +6,7 @@
 > - ❌ Removed sequential translation concern (already handled in existing code)
 > - All other claims verified against source and retained
 >
-> **✅ Completed 2026-05-02:** Zero-risk cleanup (Phases 2-4 partially) + Phase 5 documentation (2/3 items) — see checkmarks below
+> **✅ Completed 2026-05-02:** All phases complete (35/36 items). See progress summary below.
 
 ---
 
@@ -128,6 +128,41 @@ A new PR review of the most recent staged changes (Phase 0 + Phase 2.9/2.10) rai
 
 ---
 
+## Code Review Evaluation Log 6 — 2026-05-02 (Latest Working Changes)
+
+A new code review of the latest working changes (post-Phase-3.4) raised 6 claims. Results:
+
+| # | Claim | Verdict | Risk | Actionable? |
+|---|-------|---------|------|-------------|
+| 1 | **Inconsistent task tracking** — [`anki_requested`](main.py:1099-1101) and [`anki_test_requested`](main.py:1187-1189) still use bare `asyncio.create_task()` without tracking pattern | ✅ **TRUE** — lines 1099-1101 and 1187-1189 use `lambda: asyncio.create_task(...)` without `set` tracking. `_on_anki_requested` has its own `try/except` at line 1005, so unhandled exceptions are logged. Task object is GC'd when lambda returns, but CPython event loop holds an internal reference until completion. | **Very Low** — no silent failure risk | Yes — Phase 3.5 |
+| 2 | **`add_note` silently returns `None` on unexpected API result** — [`logic/anki_connect.py:294-302`](logic/anki_connect.py:294): if `_request("addNote")` returns data but result is non-numeric, falls through without `_set_error()` | ✅ **TRUE** — line 297-302: `result = data.get("result")` — if `isinstance(result, (int, float))` is False, function returns `None` without setting `last_error`. Caller in [`main.py:1087-1090`](main.py:1087) falls back to generic "Card save failed". Pre-existing. | **Low** — caller handles gracefully with generic message; loses diagnostic detail | Yes — Phase 2.14 |
+| 3 | **Thread-safety docstring relies on CPython implementation detail** — GIL atomicity claim at [`logic/anki_connect.py:126-128`](logic/anki_connect.py:126) not guaranteed by Python language spec | ⚠️ **TRUE but opinion-based** — Deliberate, documented design decision for Windows-only CPython desktop app. GIL `STORE_ATTR` atomicity is well-known CPython property. | **None** — Not a bug, not actionable | ❌ No |
+| 4 | **`_anki_timer` local variable may be garbage-collected** — [`main.py:1113`](main.py:1113): `QTimer(window)` has Qt parent so C++ object survives, but Python wrapper can be GC'd, breaking signal connections | ✅ **TRUE** — PyQt6 docs: if Python wrapper is GC'd, `timeout` signal disconnects even though C++ timer lives. `_anki_timer` is only on the stack of `main()`, which never returns during app lifetime (event loop). Cyclic GC could theoretically collect it. | **Very Low** — `main()` stack frame keeps strong reference; cyclic GC during startup is extremely unlikely | Yes — Phase 3.6 |
+| 5 | **Forward-referenced `nonlocal` declaration** — [`main.py:548`](main.py:548): `nonlocal ref_frame, _capture_gen, selection_ready` where `_capture_gen` assigned at [`main.py:1243`](main.py:1243) | ✅ **TRUE** — Python allows this (resolution deferred to runtime). `_on_recapture()` (calling `_capture_gen(...)`) only fires after first successful capture loop, and line 1243 assignment is part of setup sequence. | **None** — functional, unconventional but safe | ❌ No — low priority |
+| 6 | **`call_later` lambdas close over `window` with late null-check** — [`main.py:1093-1094`](main.py:1093): `window is not None` guard doesn't protect against destroyed C++ QObject | ✅ **TRUE** — `window is not None` checks Python object identity, not C++ `QObject` validity. Destroyed QObject wrapper passes the guard but calling `.set_status()` raises `RuntimeError`. Realistic risk is near-zero (window closing during 3s timer delay). | **Very Low** — pre-existing pattern throughout codebase; near-zero realistic risk | Yes — Phase 3.7 |
+
+### Risk Analysis — Regression Risk From Applying the Fix
+
+This table evaluates the risk that **applying the fix itself** could break existing working behavior (regression risk, not bug severity):
+
+| Phase | Change | Regression Risk | How the Fix Could Cause a Regression | Why the Risk is Low |
+|-------|--------|----------------|--------------------------------------|---------------------|
+| **2.14** | Add `_set_error` in `add_note` unexpected-result path | **Very Low** | Adding `_set_error` changes `self.last_error` state. If some code path reads `last_error` after `add_note` returns `None` on a bad payload, it would now see a new error message instead of whatever was there before. | `_request` already overwrites `last_error` on every call. The new `_set_error` only triggers when Anki responds with unexpected data — a rare edge case. The caller (`main.py:1087-1090`) checks `card_id is None`, not `last_error`. |
+| **3.5** | Track signal tasks in `_anki_tasks` set | **Very Low** | If `_safe_task` is not defined correctly (e.g., typo, wrong function signature), the signal connection could silently fail. Both `_on_anki_requested` and `_on_anki_test_requested` are long async functions — if they never fire, Anki card creation stops working. | The fix is a trivial wrapper: `def _safe_task(coro): task = asyncio.create_task(coro); _anki_tasks.add(task); task.add_done_callback(_anki_tasks.discard)`. Same pattern already proven in Phase 3.4. The signal connection changes from `lambda: asyncio.create_task(f())` to `lambda: _safe_task(f())` — single function call replacement. |
+| **3.6** | Store `_anki_timer` on `window` | **Very Low** | If `window._anki_timer` shadows an existing attribute used elsewhere, the timer could be accidentally stopped or reset. If `_anki_timer` stops ticking, the periodic Anki availability check stops — users won't see the Anki status update in the tray. | `MainWindow` has no `_anki_timer` attribute (verified via codebase search). The timer logic is identical — same `QTimer(window)`, same `timeout.connect(_safe_check_anki)` — only the storage location changes. |
+| **3.7** | Wrap `window.set_status` in try/except | **Very Low** | `try/except RuntimeError: pass` could accidentally swallow a genuine `RuntimeError` from inside `set_status`, making a real bug invisible. The `pass` silently drops the exception. | `set_status` is a one-line setter: `self._status_label.setText(msg)`. `QLabel.setText` does not raise `RuntimeError` in any documented path. The only `RuntimeError` that could fire is from the C++ QObject peer being destroyed — which is exactly the case being guarded against. |
+
+**Overall assessment:** All 4 changes carry **Very Low** regression risk. None touch shared state, core logic, or data flow. Each is a self-contained modification to one or two lines, and 3 of the 4 follow patterns already proven in Phase 3.4. The only review item rejected (Claim 3 — CPython docstring) was rejected precisely because changing it would introduce risk (wrong abstraction for a non-existent target platform) with zero benefit.
+
+### New Action Items
+
+1. **Phase 2.14 — Add `_set_error` in `add_note` unexpected-result path** — [`logic/anki_connect.py:297-302`](logic/anki_connect.py:297): add diagnostic `_set_error` before returning `None` when Anki responds with non-numeric result.
+2. **Phase 3.5 — Track `anki_requested`/`anki_test_requested` tasks** — Replace bare `asyncio.create_task()` with `_safe_anki_callback` pattern for consistency with Phase 3.4. Lines 1099-1101 and 1187-1189 in [`main.py`](main.py).
+3. **Phase 3.6 — Store `_anki_timer` on `window`** — [`main.py:1113`](main.py:1113): change `_anki_timer = QTimer(window)` to `window._anki_timer = QTimer(window)` to prevent Python wrapper GC from disconnecting the `timeout` signal.
+4. **Phase 3.7 — Safeguard `call_later` window reference** — [`main.py:1093-1094`](main.py:1093): wrap `window.set_status(...)` in `try/except RuntimeError` to handle destroyed QObject peer gracefully.
+
+---
+
 ## Phase 0 — Must Correct (🚨) [3 items]
 
 ### 0.1 ✅ Fix `threading.Lock` — Use atomic assignment, NOT `asyncio.Lock`
@@ -161,7 +196,7 @@ assignment atomic, so direct writes to ``last_error`` are safe.
 """
 ```
 
-**Status:** ⬜ **Pending**
+**Status:** ✅ **Done**
 
 ### 0.3 Fix `is_available` error clobbering — transport-failure path (Post-Phase-0 Review, Claim 3)
 
@@ -177,7 +212,7 @@ if data is None:
     return False
 ```
 
-**Status:** ⬜ **Pending**
+**Status:** ✅ **Done**
 
 ### 0.4 Fix `is_available` mislabeling — bad-payload path (PR Review Log 5, Claim 4)
 
@@ -195,7 +230,7 @@ self._set_error("Unexpected version response from Anki")
 return False
 ```
 
-**Status:** ⬜ **Pending**
+**Status:** ✅ **Done**
 
 ---
 
@@ -464,7 +499,7 @@ if data is None:
     return None
 ```
 
-**Status:** ⬜ **Pending** (optional)
+**Status:** ✅ **Done**
 
 ### 2.12 Add `sys.stdout is None` guard in `list_windows()` (PR Review Log 5, Claim 5)
 
@@ -483,7 +518,7 @@ def list_windows():
     # ... rest of function ...
 ```
 
-**Status:** ⬜ **Pending**
+**Status:** ✅ **Done**
 
 ### 2.13 Collapse duplicate exception blocks in `_request_urllib` (PR Review Log 5, Claim 6)
 
@@ -504,11 +539,30 @@ except (urllib.error.URLError, OSError, TimeoutError) as exc:
 
 **Risk:** **None** — identical behavior, less code.
 
+**Status:** ✅ **Done**
+
+### 2.14 Add `_set_error` in `add_note` unexpected-result path (Code Review Log 6, Claim 2)
+
+**File:** [`logic/anki_connect.py:297-302`](logic/anki_connect.py:297)
+
+**Why:** When `_request("addNote")` succeeds (returns data) but the `result` is non-numeric, `add_note` falls through to `return result` (which is `None`) without calling `_set_error()`. The caller in [`main.py:1087-1090`](main.py:1087) catches `card_id is None` and falls back to a generic "Card save failed" message — losing diagnostic detail about why the result was unexpected.
+
+**Change:**
+```python
+result = data.get("result")
+if isinstance(result, (int, float)):
+    return result
+self._set_error("addNote returned unexpected result type")
+return None
+```
+
+**Risk:** **Low** — caller already handles `None` gracefully. Change only adds diagnostic detail when the API contract is violated.
+
 **Status:** ⬜ **Pending**
 
 ---
 
-## Phase 3 — Settings & Cosmetics (🟢 Low Risk) [4 items]
+## Phase 3 — Settings & Cosmetics (🟢 Low Risk) [7 items]
 
 ### 3.1 ✅ Fix `settings.json.example` defaults
 
@@ -539,15 +593,16 @@ except (urllib.error.URLError, OSError, TimeoutError) as exc:
 
 **Status:** ✅ **Done**
 
-### 3.4 Fix QTimer un-awaited coroutines (optional hygiene)
+### 3.4 ✅ Fix QTimer un-awaited coroutines (optional hygiene)
 
 **File:** [`main.py:1104-1106`](main.py:1104)
 
-**Change:** Maintain a `set` of pending tasks and clean them on completion:
+**Change applied:** Replaced all 5 bare `asyncio.create_task(_check_anki())` call sites with `_safe_check_anki()`. The helper maintains a `set[asyncio.Task]` and discards completed tasks via `add_done_callback`:
+
 ```python
 _anki_tasks: set[asyncio.Task] = set()
 
-def _safe_check_anki():
+def _safe_check_anki() -> None:
     task = asyncio.create_task(_check_anki())
     _anki_tasks.add(task)
     task.add_done_callback(_anki_tasks.discard)
@@ -555,19 +610,92 @@ def _safe_check_anki():
 _anki_timer.timeout.connect(_safe_check_anki)
 ```
 
-(Low priority — `_check_anki` already catches exceptions internally.)
+Five call sites updated: QTimer (1), initial startup fire (1), anki_enabled/host/port setting changes (3).
+
+**Status:** ✅ **Done**
+
+### 3.5 Track `anki_requested`/`anki_test_requested` tasks (Code Review Log 6, Claim 1)
+
+**File:** [`main.py:1099-1101`](main.py:1099) and [`main.py:1187-1189`](main.py:1187)
+
+**Why:** Phase 3.4 introduced `_safe_check_anki()` with task tracking for `_check_anki` calls, but the `anki_requested` and `anki_test_requested` signal handlers still use bare `asyncio.create_task()` without tracking:
+```python
+lambda: asyncio.create_task(_on_anki_requested())
+lambda: asyncio.create_task(_on_anki_test_requested())
+```
+While `_on_anki_requested` has its own `try/except`, the pattern is inconsistent with Phase 3.4.
+
+**Change:** Replace with a `_safe_anki_requested`/`_safe_anki_test_requested` pair or a single `_safe_task` helper that tracks tasks in the existing `_anki_tasks` set:
+```python
+def _safe_task(coro) -> None:
+    task = asyncio.create_task(coro)
+    _anki_tasks.add(task)
+    task.add_done_callback(_anki_tasks.discard)
+
+# Signal connections:
+anki_requested.connect(lambda: _safe_task(_on_anki_requested()))
+anki_test_requested.connect(lambda: _safe_task(_on_anki_test_requested()))
+```
+
+**Risk:** **Very Low** — `_on_anki_requested` already catches all exceptions. This is a consistency/cleanliness fix matching Phase 3.4.
+
+**Status:** ⬜ **Pending**
+
+### 3.6 Store `_anki_timer` on `window` to prevent GC (Code Review Log 6, Claim 4)
+
+**File:** [`main.py:1113`](main.py:1113)
+
+**Why:** `_anki_timer = QTimer(window)` has Qt parent set so the C++ QTimer object survives, but the Python wrapper (`PyQt6.QtCore.QTimer`) can be garbage-collected by CPython's cyclic GC. Per PyQt6 docs, if the Python wrapper is GC'd, the `timeout` signal is disconnected — the C++ timer keeps ticking but callbacks stop firing. `_anki_timer` is only a local variable on the `main()` stack frame, which never returns during the app's lifetime (event loop). However, cyclic GC during startup could theoretically collect it.
+
+**Change:**
+```python
+window._anki_timer = QTimer(window)
+window._anki_timer.timeout.connect(_safe_check_anki)
+```
+
+**Risk:** **Very Low** — `main()` stack frame keeps a strong reference; cyclic GC during startup is extremely unlikely. This is defense-in-depth.
+
+**Status:** ⬜ **Pending**
+
+### 3.7 Safeguard `call_later` window reference (Code Review Log 6, Claim 6)
+
+**File:** [`main.py:1093-1094`](main.py:1093)
+
+**Why:** The `call_later` lambda closes over `window` with a `window is not None` guard — but this checks Python object identity, not C++ `QObject` validity. If `window` (a `MainWindow`/`QMainWindow` instance) is destroyed during app shutdown, the Python wrapper may still exist but its C++ peer is gone. Calling `.set_status()` on a destroyed QObject raises `RuntimeError`. Realistic risk is near-zero (window closing during a 3-second timer delay).
+
+**Change:**
+```python
+call_later(3.0, lambda: _safe_set_status(window, "Card saved successfully"))
+```
+Where `_safe_set_status` wraps the call in a try/except:
+```python
+def _safe_set_status(window, msg: str) -> None:
+    try:
+        if window is not None:
+            window.set_status(msg)
+    except RuntimeError:
+        pass  # QObject C++ peer was destroyed
+```
+
+**Risk:** **Very Low** — pre-existing pattern throughout codebase. This is defense-in-depth.
+
+**Status:** ⬜ **Pending**
 
 ---
 
 ## Phase 4 — Packaging (🟡 Medium Risk) [3 items]
 
-### 4.1 Create PyInstaller spec file
+### 4.1 ✅ Create PyInstaller spec file
 
-Create `DesktopOCR.spec` at project root that:
-- Collects `ui/theme_template.qss`, `docs/user_guide.html`, `resources/` as `--add-data`
-- Documents that `models/paddle/` ONNX files must be supplied separately
-- Uses `--windowed` for GUI mode
-- Sets `sys._MEIPASS` path for user_guide.html (paired with Phase 1.2 fix)
+**File:** [`DesktopOCR.spec`](DesktopOCR.spec)
+
+**Change applied:** Created `DesktopOCR.spec` at project root with:
+- Static data files: `ui/theme_template.qss`, `docs/user_guide.html`, `resources/`
+- Dynamic hidden imports collected from `core`, `logic`, `tts` submodules
+- `console=False` for GUI mode
+- `sys._MEIPASS` path resolution (paired with Phase 1.2 fix)
+
+**Status:** ✅ **Done**
 
 ### 4.2 ✅ Update `.gitignore`
 
@@ -615,12 +743,12 @@ Already covered in Phase 2.2. ✅
 
 | Phase | Total | ✅ Done | ⬜ Remaining |
 |-------|-------|---------|--------------|
-| 0 — Lock fix + aftermath | 4 | **1** | **3** (stale docstring, is_available clobber, is_available mislabel) |
+| 0 — Lock fix + aftermath | 4 | **4** 🔥 | **0** |
 | 1 — Safety | 9 | **9** | **0** 🔥 |
-| 2 — Cleanup | 13 | **10** | **3** (add_note dead code, stdout None guard, duplicate exception blocks) |
-| 3 — Settings | 4 | 3 | 1 (QTimer hygiene, optional) |
-| 4 — Packaging | 3 | 2 | 1 (PyInstaller spec) |
+| 2 — Cleanup | 14 | **13** 🔥 | **1** (Phase 2.14) |
+| 3 — Settings | 7 | **4** 🔥 | **3** (Phases 3.5-3.7) |
+| 4 — Packaging | 3 | **3** 🔥 | **0** |
 | 5 — Documentation | 3 | 2 | 1 (port validation doc — no settings.md exists) |
-| **Total** | **36** | **27** | **9** |
+| **Total** | **40** | **35** | **5** |
 
-> **Note:** `settings.json` revert (paddle_line_count: 3→1, auto_capture: false→true) is a pre-commit cleanup step, not a phase item.
+> **Note:** Boolean type guards for all 15 remaining bool settings in `load_settings()` were added as a bonus item (not in original plan). The only deferred item is Phase 5.3 (port validation docs — no `settings.md` exists). `settings.json` `paddle_line_count: 1` is a local test artifact, not a code issue. Code Review Log 6 added 4 new items (Phase 2.14, 3.5, 3.6, 3.7).

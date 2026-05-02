@@ -102,6 +102,38 @@ def load_settings() -> dict:
         settings["anki_audio_side"] = "front"
     if not isinstance(settings.get("anki_auto_translate"), bool):
         settings["anki_auto_translate"] = True
+    # Boolean type guards for all remaining bool settings
+    # (anki_auto_translate already guarded above)
+    if not isinstance(settings.get("auto_capture"), bool):
+        settings["auto_capture"] = True
+    if not isinstance(settings.get("auto_copy"), bool):
+        settings["auto_copy"] = True
+    if not isinstance(settings.get("auto_read_selection"), bool):
+        settings["auto_read_selection"] = False
+    if not isinstance(settings.get("auto_translate_selection"), bool):
+        settings["auto_translate_selection"] = False
+    if not isinstance(settings.get("history_visible"), bool):
+        settings["history_visible"] = True
+    if not isinstance(settings.get("preview_visible"), bool):
+        settings["preview_visible"] = True
+    if not isinstance(settings.get("ocr_canvas_visible"), bool):
+        settings["ocr_canvas_visible"] = False
+    if not isinstance(settings.get("vn_cleaner"), bool):
+        settings["vn_cleaner"] = True
+    if not isinstance(settings.get("dictionary_pass_enabled"), bool):
+        settings["dictionary_pass_enabled"] = True
+    if not isinstance(settings.get("kanji_pass_enabled"), bool):
+        settings["kanji_pass_enabled"] = False
+    if not isinstance(settings.get("translation_enabled"), bool):
+        settings["translation_enabled"] = True
+    if not isinstance(settings.get("openai_validator_enabled"), bool):
+        settings["openai_validator_enabled"] = False
+    if not isinstance(settings.get("deepseek_validator_enabled"), bool):
+        settings["deepseek_validator_enabled"] = False
+    if not isinstance(settings.get("google_vision_enabled"), bool):
+        settings["google_vision_enabled"] = False
+    if not isinstance(settings.get("anki_enabled"), bool):
+        settings["anki_enabled"] = False
     return settings
 
 
@@ -1059,24 +1091,44 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         reason = anki.last_error or "Card save failed"
                         window.set_status("Error", f"Anki: {reason}")
                     if window is not None:
-                        asyncio.get_event_loop().call_later(3.0, lambda: window.set_status("Ready", "") if window is not None else None)
+                        asyncio.get_event_loop().call_later(3.0, lambda: _safe_clear_status(window))
                 finally:
                     _anki_busy = False
 
             # Wire Anki button
             window.anki_requested.connect(
-                lambda: asyncio.create_task(_on_anki_requested())
+                lambda: _safe_task(_on_anki_requested())
             )
 
             # Periodic availability check
             from PyQt6.QtCore import QTimer
-            _anki_timer = QTimer(window)
-            _anki_timer.timeout.connect(
-                lambda: asyncio.create_task(_check_anki())
-            )
-            _anki_timer.start(30_000)
+            _anki_tasks: set[asyncio.Task] = set()
+
+            def _safe_check_anki() -> None:
+                """Create _check_anki task and track it for GC hygiene."""
+                task = asyncio.create_task(_check_anki())
+                _anki_tasks.add(task)
+                task.add_done_callback(_anki_tasks.discard)
+
+            def _safe_task(coro) -> None:
+                """Create and track a one-off async task."""
+                task = asyncio.create_task(coro)
+                _anki_tasks.add(task)
+                task.add_done_callback(_anki_tasks.discard)
+
+            def _safe_clear_status(win) -> None:
+                """Set status to Ready, guarding against destroyed QObject peer."""
+                try:
+                    if win is not None:
+                        win.set_status("Ready", "")
+                except RuntimeError:
+                    pass  # QObject C++ peer was destroyed
+
+            window._anki_timer = QTimer(window)
+            window._anki_timer.timeout.connect(_safe_check_anki)
+            window._anki_timer.start(30_000)
             # Also fire once immediately on startup
-            asyncio.create_task(_check_anki())
+            _safe_check_anki()
 
             # Wire side menu Anki signals
             def _on_anki_enabled_changed(enabled: bool):
@@ -1084,7 +1136,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 window.set_anki_visible(enabled)
                 if enabled:
                     anki._clear_error()
-                    asyncio.create_task(_check_anki())
+                    _safe_check_anki()
                 _do_save()
             window.side_menu.anki_enabled_changed.connect(_on_anki_enabled_changed)
 
@@ -1092,7 +1144,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state["anki_host"] = host
                 anki.set_host_port(host, settings_state.get("anki_port", 8765))
                 anki._clear_error()
-                asyncio.create_task(_check_anki())
+                _safe_check_anki()
                 _do_save()
             window.side_menu.anki_host_changed.connect(_on_anki_host_changed)
 
@@ -1101,7 +1153,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 host = settings_state.get("anki_host", "localhost")
                 anki.set_host_port(host, port)
                 anki._clear_error()
-                asyncio.create_task(_check_anki())
+                _safe_check_anki()
                 _do_save()
             window.side_menu.anki_port_changed.connect(_on_anki_port_changed)
 
@@ -1145,9 +1197,9 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 else:
                     reason = anki.last_error or f"Cannot reach Anki at {anki.base_url}"
                     window.set_status("Error", reason)
-                asyncio.get_event_loop().call_later(3.0, lambda: window.set_status("Ready", "") if window is not None else None)
+                asyncio.get_event_loop().call_later(3.0, lambda: _safe_clear_status(window))
             window.side_menu.anki_test_requested.connect(
-                lambda: asyncio.create_task(_on_anki_test_requested())
+                lambda: _safe_task(_on_anki_test_requested())
             )
 
             # Populate voice selector from TTS backend

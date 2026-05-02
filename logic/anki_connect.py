@@ -124,9 +124,8 @@ class AnkiConnect:
         """Fallback using urllib.request wrapped in a thread-pool executor.
 
         Thread-safety note: ``_sync_post`` runs in a thread-pool executor
-        (``run_in_executor``). All ``self.last_error`` assignments go through
-        ``_set_error`` / ``_clear_error`` which are protected by a
-        ``threading.Lock``, safe for both coroutine and thread-pool access.
+        (``run_in_executor``). Under CPython the GIL makes single attribute
+        assignment atomic, so direct writes to ``last_error`` are safe.
         """
         import urllib.request  # noqa: PLC0415
 
@@ -152,14 +151,7 @@ class AnkiConnect:
                         self._set_error(f"Anki rejected '{action}': {error_text}")
                         return None
                     return data
-            except urllib.error.URLError as exc:
-                if quiet:
-                    logger.debug("[Anki] Poll failed: %s", exc)
-                else:
-                    logger.warning("[Anki] Request failed: %s", exc)
-                self._set_error(f"Transport error: {exc}")
-                return None
-            except (OSError, TimeoutError) as exc:
+            except (urllib.error.URLError, OSError, TimeoutError) as exc:
                 if quiet:
                     logger.debug("[Anki] Poll failed: %s", exc)
                 else:
@@ -184,13 +176,14 @@ class AnkiConnect:
         """
         data = await self._request("version", timeout=2.0, quiet=True)
         if data is None:
-            self._set_error("Anki is not running")
+            if self.last_error is None:
+                self._set_error("Anki is not running")
             return False
         result = data.get("result")
         if isinstance(result, (int, float)):
             self._clear_error()
             return True
-        self._set_error("Anki is not running")
+        self._set_error("Unexpected version response from Anki")
         return False
 
     async def ensure_deck(self, deck_name: str) -> bool:
@@ -300,11 +293,11 @@ class AnkiConnect:
 
         data = await self._request("addNote", {"note": note})
         if data is None:
-            if self.last_error is None:
-                self._set_error("Card save failed")
+            # _request should have set last_error already; keep fallback for safety
             return None
         result = data.get("result")
         if isinstance(result, (int, float)):
             self._clear_error()
             return int(result)
+        self._set_error("addNote returned unexpected result type")
         return None

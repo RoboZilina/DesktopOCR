@@ -7,6 +7,8 @@ import sys
 
 def list_windows():
     """Enumerate all visible top-level windows and print them to stdout."""
+    if sys.stdout is None:
+        return
     user32 = ctypes.windll.user32
     EnumWindows = user32.EnumWindows
     GetWindowText = user32.GetWindowTextW
