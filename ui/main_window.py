@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import pathlib
+import sys
 from collections import deque
 import numpy as np
 
@@ -172,7 +173,6 @@ class MainWindow(QMainWindow):
         )
         self.side_menu.user_guide_requested.connect(self._show_user_guide)
 
-        import sys
         _base = pathlib.Path(getattr(sys, "_MEIPASS", pathlib.Path(__file__).parent.parent))
         self._user_guide_path = _base / "docs" / "user_guide.html"
 

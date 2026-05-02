@@ -413,9 +413,9 @@ Already covered in Phase 2.2. ✅
 | Phase | Total | ✅ Done | ⬜ Remaining |
 |-------|-------|---------|--------------|
 | 0 — Lock fix | 1 | 0 | 1 |
-| 1 — Safety | 9 | 5 | 4 (1.5 bool fix, 1.6 defense, 1.7 optional, 1.8 cosmetic, 1.9 stylistic) |
+| 1 — Safety | 9 | **9** | **0** 🔥 |
 | 2 — Cleanup | 8 | 6 | 2 (json.loads duplicate, consolidate list_windows) |
 | 3 — Settings | 4 | 3 | 1 (QTimer hygiene, optional) |
 | 4 — Packaging | 3 | 2 | 1 (PyInstaller spec) |
 | 5 — Documentation | 3 | 2 | 1 (port validation doc — no settings.md exists) |
-| **Total** | **28** | **18** | **10** |
+| **Total** | **28** | **22** | **6** |

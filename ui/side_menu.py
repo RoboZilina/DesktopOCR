@@ -1168,7 +1168,7 @@ class SideMenu(QWidget):
                 self._anki_port_edit.setText(str(port))
         except (ValueError, TypeError):
             port = 8765
-            # Restore the valid port in the field so the user sees what was applied
+            # Reset to default port
             self._anki_port_edit.setText(str(port))
         self.anki_port_changed.emit(port)
 

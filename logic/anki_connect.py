@@ -34,6 +34,11 @@ class AnkiConnect:
 
     def set_host_port(self, host: str, port: int) -> None:
         """Update the AnkiConnect endpoint without creating a new client instance."""
+        # Clamp to valid port range (defense-in-depth; load_settings() also validates)
+        if not isinstance(port, int) or isinstance(port, bool):
+            port = 8765
+        elif port < 1 or port > 65535:
+            port = 8765
         self._base_url = f"http://{host}:{port}"
 
     @property

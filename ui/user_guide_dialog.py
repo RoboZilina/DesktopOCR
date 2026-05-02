@@ -35,7 +35,9 @@ class UserGuideDialog(QDialog):
         if guide_path:
             path = pathlib.Path(guide_path)
         else:
-            path = pathlib.Path("docs/user_guide.html")
+            import sys
+            _base = pathlib.Path(getattr(sys, "_MEIPASS", pathlib.Path(__file__).parent.parent))
+            path = _base / "docs" / "user_guide.html"
 
         if not path.exists():
             return ""  # silently ignore

@@ -86,7 +86,8 @@ def load_settings() -> dict:
     # Defensive type guards — settings.json may be hand-edited with invalid types
     if not isinstance(settings.get("anki_host"), str):
         settings["anki_host"] = "localhost"
-    if not isinstance(settings.get("anki_port"), int):
+    # bool is a subclass of int in Python — must exclude it explicitly
+    if not isinstance(settings.get("anki_port"), int) or isinstance(settings.get("anki_port"), bool):
         settings["anki_port"] = 8765
     if not 1 <= settings.get("anki_port", 8765) <= 65535:
         settings["anki_port"] = 8765
