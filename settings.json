@@ -1,7 +1,7 @@
 {
   "ocr_engine": "server",
-  "paddle_line_count": 3,
-  "auto_capture": false,
+  "paddle_line_count": 1,
+  "auto_capture": true,
   "auto_copy": true,
   "auto_read_selection": false,
   "auto_translate_selection": false,

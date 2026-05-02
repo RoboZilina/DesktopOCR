@@ -1,7 +1,5 @@
 import argparse
 import asyncio
-import ctypes
-import ctypes.wintypes
 import json
 import logging
 import math

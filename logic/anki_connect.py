@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import threading
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,6 @@ class AnkiConnect:
     def __init__(self, host: str = "localhost", port: int = 8765) -> None:
         self._base_url = f"http://{host}:{port}"
         self.last_error: str | None = None
-        self._last_error_lock = threading.Lock()
 
     def set_host_port(self, host: str, port: int) -> None:
         """Update the AnkiConnect endpoint without creating a new client instance."""
@@ -47,12 +45,10 @@ class AnkiConnect:
         return self._base_url
 
     def _set_error(self, msg: str) -> None:
-        with self._last_error_lock:
-            self.last_error = msg
+        self.last_error = msg
 
     def _clear_error(self) -> None:
-        with self._last_error_lock:
-            self.last_error = None
+        self.last_error = None
 
     # ------------------------------------------------------------------
     # Session management

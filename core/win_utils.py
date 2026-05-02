@@ -33,6 +33,7 @@ def list_windows():
 
     print("--- Visible Windows ---")
     for hwnd, title in windows:
-        safe_title = title.encode(sys.stdout.encoding, errors="replace").decode(sys.stdout.encoding)
+        encoding = sys.stdout.encoding or "utf-8"
+        safe_title = title.encode(encoding, errors="replace").decode(encoding)
         print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {safe_title}")
     print("-----------------------")

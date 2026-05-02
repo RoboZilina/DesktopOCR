@@ -69,9 +69,68 @@ A second PR review of the Phase 1 remainder patches raised 4 new issues. Results
 
 ---
 
-## Phase 0 — Must Correct (🚨) [1 item]
+## PR Review Evaluation Log 3 — 2026-05-02
 
-### 0.1 Fix `threading.Lock` — Use atomic assignment, NOT `asyncio.Lock`
+A third PR review of the **Phase 2 cleanup** patches (json.loads deduplication, list_windows consolidation, test_capture.py cleanup) raised 2 issues + 2 positive observations. Results:
+
+| # | Claim | Verdict | Risk | Actionable? |
+|---|-------|---------|------|-------------|
+| 1 | `ctypes`, `ctypes.wintypes` unused in [`main.py:3-4`](main.py:3) after `list_windows()` moved to `core/win_utils.py` | ✅ **TRUE** — confirmed via regex search: `ctypes` only appears on lines 3-4 in the entire 1514-line file. Zero references remain. Dead imports. | **None** — no runtime impact; violates PEP8 import hygiene | Yes — remove dead imports |
+| 2 | Pre-existing: `sys.stdout.encoding` can be `None` in [`core/win_utils.py:36`](core/win_utils.py:36) | ✅ **TRUE** — `title.encode(sys.stdout.encoding, ...)` crashes with `TypeError: encode() argument 1 must be str, not None` when stdout is redirected to a pipe/file (or in PyInstaller frozen builds where `sys.stdout.encoding` is `None`). Bug was carried over verbatim from the original `main.py` implementation. | **Low** — `list_windows()` is a dev/debug tool; crash would occur before any meaningful work | Yes — add encoding fallback |
+| — | **Positive observation:** anki_connect.py action refactor is clean | ✅ **Confirmed** — no `json.loads(body)` calls remain in either `_request_aiohttp` or `_request_urllib`; `action` parameter is threaded correctly through both paths | — | — |
+| — | **Positive observation:** test_capture.py deduplication is correct | ✅ **Confirmed** — `ctypes` imports and duplicate `list_windows()` function properly removed; clean `from core.win_utils import list_windows` | — | — |
+
+**Action items for plan:**
+
+1. **Remove unused `ctypes` and `ctypes.wintypes` imports** from [`main.py:3-4`](main.py:3) — clean dead imports after `list_windows()` consolidation.
+2. **Add `sys.stdout.encoding` None guard** in [`core/win_utils.py:36`](core/win_utils.py:36) — use `encoding = sys.stdout.encoding or "utf-8"` before calling `.encode()`/`.decode()`.
+
+---
+
+## Code Review Evaluation Log 4 — 2026-05-02 (Post-Phase-0 Review)
+
+A post-Phase-0 code review of the `threading.Lock` removal raised 3 issues. Results:
+
+| # | Claim | Verdict | Risk | Actionable? |
+|---|-------|---------|------|-------------|
+| 1 | Stale docstring in [`_request_urllib`](logic/anki_connect.py:124) still claims ``threading.Lock`` protection | ✅ **TRUE** — lines 126-129: "protected by a ``threading.Lock``" — lock no longer exists. Misleading to maintainers. | **Low** — docs only; no runtime impact | Yes |
+| 2 | Dead error fallback in [`add_note`](logic/anki_connect.py:301-304) — `self.last_error is None` never True | ✅ **TRUE** — all 8 code paths in `_request` call `_set_error` before returning `None`. The `if self.last_error is None:` guard is dead code. | **Extremely Low** — silent dead code, never executes | Optional — remove or comment as defense-in-depth |
+| 3 | [`is_available`](logic/anki_connect.py:185-188) overwrites specific error messages with generic "Anki is not running" | ✅ **TRUE** — line 187 immediately overwrites `_request`'s specific error like `"Transport error: [WinError 10061]"` with generic `"Anki is not running"`, erasing diagnostic detail. | **Low-Medium** — impacts UX debugging; hides root cause of Anki connectivity failures | Yes — only set generic if `last_error` is still None |
+
+**Action items for plan:**
+
+1. **Fix stale docstring** in `_request_urllib` — update or remove the `threading.Lock` claim (Phase 0.2 — direct consequence of Phase 0.1).
+2. **Fix `is_available` error clobbering** — add `if self.last_error is None:` guard before setting generic message (Phase 0.3).
+3. **Optional: Remove dead `last_error is None` check in `add_note`** — or add comment noting it's defense-in-depth (Phase 2.11).
+
+---
+
+## PR Review Evaluation Log 5 — 2026-05-02 (Latest Staged Changes)
+
+A new PR review of the most recent staged changes (Phase 0 + Phase 2.9/2.10) raised 7 issues. Results:
+
+| # | Claim | Verdict | Risk | Actionable? |
+|---|-------|---------|------|-------------|
+| 1 | Stale docstring in [`_request_urllib`](logic/anki_connect.py:124) still claims ``threading.Lock`` protection | ✅ **TRUE** — lines 126-129: "protected by a ``threading.Lock``" — lock removed in Phase 0.1 | **Low** — docs only; no runtime impact | Already in plan as Phase 0.2 |
+| 2 | [`is_available`](logic/anki_connect.py:186-188) overwrites specific error messages with generic "Anki is not running" | ✅ **TRUE** — line 187 overwrites `_request`'s specific diagnostic with generic message | **Low-Medium** — impacts UX debugging | Already in plan as Phase 0.3 |
+| 3 | [`settings.json`](settings.json) has accidental local config changes: `paddle_line_count: 3→1`, `auto_capture: false→true` | ✅ **TRUE** — confirmed: `paddle_line_count: 1` (line 3), `auto_capture: true` (line 4). These are test artifacts, not product defaults. | **Low** — user's personal settings, only affects their local run | Yes — revert before commit |
+| 4 | [`is_available`](logic/anki_connect.py:189-193) mislabels protocol errors as "not running" when Anki responds with bad payload | ✅ **TRUE** — line 193: when `result` is not a number, it says "Anki is not running" — but Anki *did* respond, so the message is factually wrong. Should be "Unexpected version response from Anki" or similar. | **Low** — impacts UX diagnosis; user sees wrong error message | Yes — distinct fix from Claim 2 (different code path) |
+| 5 | [`core/win_utils.py`](core/win_utils.py:34-39) can crash if `sys.stdout` is `None` (e.g. `pythonw.exe`, headless) | ✅ **TRUE** — Phase 2.10 fixed `sys.stdout.encoding` being None, but `sys.stdout` itself can be None. `print()` raises `RuntimeError`, `sys.stdout.encoding` raises `AttributeError`. Called unconditionally at [`main.py:225`](main.py:225). | **Low** — `list_windows()` is dev-facing; production GUI uses `pythonw.exe` only after PyInstaller packaging | Yes — add `if sys.stdout is None: return` guard |
+| 6 | Duplicate exception blocks in [`_request_urllib`](logic/anki_connect.py:155-168) — `urllib.error.URLError` and `(OSError, TimeoutError)` have identical bodies | ✅ **TRUE** — lines 155-161 and 162-168 are byte-for-byte identical. Can be collapsed into `except (urllib.error.URLError, OSError, TimeoutError)`. | **None** — code quality only | Yes — collapse into single except tuple |
+| 7 | Dead defensive guard in [`add_note`](logic/anki_connect.py:302-304) — `self.last_error is None` never True | ✅ **TRUE** — all 8 `_request` failure paths call `_set_error` before returning None | **Extremely Low** — dead code | Already in plan as Phase 2.11 |
+
+**New action items (not yet in plan):**
+
+1. **Revert `settings.json`** — restore `paddle_line_count` to `3` and `auto_capture` to `false`. These are user-local test artifacts.
+2. **Fix `is_available` bad-payload message** at [`logic/anki_connect.py:193`](logic/anki_connect.py:193) — change `"Anki is not running"` to `"Unexpected version response from Anki"` when Anki responded but payload was invalid. This is distinct from Phase 0.3 (which is about preserving `_request`'s error when Anki doesn't respond at all).
+3. **Add `sys.stdout is None` guard** in [`core/win_utils.py:34`](core/win_utils.py:34) — early return before any `print()` calls.
+4. **Collapse duplicate exception blocks** in [`logic/anki_connect.py:155-168`](logic/anki_connect.py:155) — merge `urllib.error.URLError` and `(OSError, TimeoutError)` into single `except` tuple.
+
+---
+
+## Phase 0 — Must Correct (🚨) [3 items]
+
+### 0.1 ✅ Fix `threading.Lock` — Use atomic assignment, NOT `asyncio.Lock`
 
 **File:** [`logic/anki_connect.py`](logic/anki_connect.py)
 
@@ -79,23 +138,64 @@ A second PR review of the Phase 1 remainder patches raised 4 new issues. Results
 
 **Corrected approach:** Under CPython, the GIL protects single attribute writes. `self.last_error = msg` is already atomic. The `threading.Lock` wrapper is unnecessary overhead. Replace with direct assignment.
 
-**Changes:**
+**Changes applied:**
+1. Removed `import threading` (line 8) — confirmed unused after lock removal
+2. Removed `self._last_error_lock = threading.Lock()` (line 33)
+3. Replaced `_set_error`/`_clear_error` with direct atomic assignment
+
+**Status:** ✅ **Done**
+
+### 0.2 Fix stale docstring in `_request_urllib` (Post-Phase-0 Review, Claim 1)
+
+**File:** [`logic/anki_connect.py:124-129`](logic/anki_connect.py:124)
+
+**Why:** After Phase 0.1 removed `threading.Lock`, the docstring at lines 126-129 still claims assignments are "protected by a ``threading.Lock``" — now false and misleading to future maintainers.
+
+**Change:** Update the thread-safety paragraph to reflect GIL-based atomicity:
 ```python
-# Remove threading.Lock entirely
-# self._last_error_lock = threading.Lock()  # DELETE
+"""Fallback using urllib.request wrapped in a thread-pool executor.
+
+Thread-safety note: ``_sync_post`` runs in a thread-pool executor
+(``run_in_executor``). Under CPython the GIL makes single attribute
+assignment atomic, so direct writes to ``last_error`` are safe.
+"""
 ```
 
-```python
-# _set_error — simple atomic assignment (GIL-protected)
-def _set_error(self, msg: str) -> None:
-    self.last_error = msg
+**Status:** ⬜ **Pending**
 
-# _clear_error — simple atomic assignment
-def _clear_error(self) -> None:
-    self.last_error = None
+### 0.3 Fix `is_available` error clobbering — transport-failure path (Post-Phase-0 Review, Claim 3)
+
+**File:** [`logic/anki_connect.py:185-188`](logic/anki_connect.py:185)
+
+**Why:** `is_available` overwrites `_request`'s specific diagnostic message (e.g., `"Transport error: [WinError 10061]"`) with the generic `"Anki is not running"` — hiding the root cause from users. This is the path where `_request` returns `None` (Anki not reachable).
+
+**Change:** Only set generic message if `_request` didn't already set a specific error:
+```python
+if data is None:
+    if self.last_error is None:
+        self._set_error("Anki is not running")
+    return False
 ```
 
-Also remove `import threading` if it's no longer needed elsewhere in the file (check — it may be needed for `_sync_post` thread-pool execution).
+**Status:** ⬜ **Pending**
+
+### 0.4 Fix `is_available` mislabeling — bad-payload path (PR Review Log 5, Claim 4)
+
+**File:** [`logic/anki_connect.py:189-193`](logic/anki_connect.py:189)
+
+**Why:** When AnkiConnect *responds* but with a non-numeric `result` (line 189-193), the code says `"Anki is not running"` — but Anki IS running (it responded). This is factually wrong and misleads users during debugging.
+
+**Change:** Use a message that accurately describes the situation:
+```python
+result = data.get("result")
+if isinstance(result, (int, float)):
+    self._clear_error()
+    return True
+self._set_error("Unexpected version response from Anki")
+return False
+```
+
+**Status:** ⬜ **Pending**
 
 ---
 
@@ -281,13 +381,15 @@ self._anki_port_edit.setText(str(port))
 
 **Status:** ✅ **Done**
 
-### 2.4 Remove duplicate `json.loads(body)` in `anki_connect.py`
+### 2.4 ✅ Remove duplicate `json.loads(body)` in `anki_connect.py`
 
 **File:** [`logic/anki_connect.py:145-146`](logic/anki_connect.py:145)
 
 **Why:** `body` was built from `json.dumps(payload)` at line 79. The `action` string is already available as the `action` parameter in `_request()` scope. The re-parse is redundant.
 
 **Change:** Thread `action` parameter down to `_request_urllib` / `_sync_post` so it's available without re-parsing.
+
+**Status:** ✅ **Done**
 
 ### 2.5 ✅ Remove invalid QSS selector
 
@@ -305,13 +407,15 @@ self._anki_port_edit.setText(str(port))
 
 **Status:** ✅ **Done**
 
-### 2.7 Consolidate duplicated `list_windows()` into shared utility
+### 2.7 ✅ Consolidate duplicated `list_windows()` into shared utility
 
 **Files:** [`main.py:170-199`](main.py:170), [`tests/test_capture.py:13-42`](tests/test_capture.py:13)
 
 **Change:**
 1. Create `core/win_utils.py` with a single `list_windows()` function
 2. Import and call it from both `main.py` and `tests/test_capture.py`
+
+**Status:** ✅ **Done**
 
 ### 2.8 ✅ Expand `test_imports.py` module list
 
@@ -320,6 +424,87 @@ self._anki_port_edit.setText(str(port))
 **Change:** Added `logic.anki_connect`, `logic.anki_card_builder`, `tts.manager`, `core.translation.manager`, `core.capture_pipeline`.
 
 **Status:** ✅ **Done**
+
+### 2.9 Remove unused `ctypes` imports from `main.py` (PR Review Log 3, Claim 1)
+
+**File:** [`main.py:3-4`](main.py:3)
+
+**Why:** After `list_windows()` was consolidated into `core/win_utils.py` (Phase 2.7), `ctypes` and `ctypes.wintypes` are no longer referenced anywhere in `main.py`. Verified via regex search — zero references remain in the 1514-line file.
+
+**Change:** Delete lines 3-4 (`import ctypes` and `import ctypes.wintypes`).
+
+**Status:** ✅ **Done**
+
+### 2.10 ✅ Add `sys.stdout.encoding` None guard in `core/win_utils.py` (PR Review Log 3, Claim 2)
+
+**File:** [`core/win_utils.py:36`](core/win_utils.py:36)
+
+**Why:** When stdout is redirected to a pipe/file or in PyInstaller frozen builds, `sys.stdout.encoding` can be `None`. The current code `title.encode(sys.stdout.encoding, errors="replace")` would raise `TypeError: encode() argument 1 must be str, not None`. This bug existed in the original `main.py` implementation and was carried over verbatim during consolidation (Phase 2.7).
+
+**Change applied:**
+```python
+encoding = sys.stdout.encoding or "utf-8"
+safe_title = title.encode(encoding, errors="replace").decode(encoding)
+```
+
+**Status:** ✅ **Done**
+
+### 2.11 Optional: Remove dead `last_error is None` check in `add_note` (Post-Phase-0 Review, Claim 2)
+
+**File:** [`logic/anki_connect.py:302-304`](logic/anki_connect.py:302)
+
+**Why:** Every code path in `_request` calls `_set_error` before returning `None` (verified across all 8 paths in both transport backends). The `if self.last_error is None:` guard at line 303 is dead code that never executes.
+
+**Change:** Either remove the guard entirely, or add a comment noting it's defense-in-depth:
+```python
+if data is None:
+    # _request should have set last_error already, but guard defensively
+    if self.last_error is None:
+        self._set_error("Card save failed")
+    return None
+```
+
+**Status:** ⬜ **Pending** (optional)
+
+### 2.12 Add `sys.stdout is None` guard in `list_windows()` (PR Review Log 5, Claim 5)
+
+**File:** [`core/win_utils.py:34`](core/win_utils.py:34)
+
+**Why:** Phase 2.10 fixed the `sys.stdout.encoding` being `None` case, but `sys.stdout` itself can be `None` in headless contexts (e.g., `pythonw.exe`, PyInstaller `--noconsole`). If `sys.stdout is None`, then `sys.stdout.encoding` raises `AttributeError`, and even `print()` raises `RuntimeError`. [`list_windows()`](core/win_utils.py:8) is called unconditionally at [`main.py:225`](main.py:225), meaning any headless/noconsole invocation crashes before doing any work.
+
+**Risk:** **Low** — `list_windows()` is a dev/debug tool; production GUI uses QApplication. However, `--list-engines` flag at [`main.py:1444`](main.py:1444) calls `main(0)` which hits `list_windows()` before any QApplication check.
+
+**Change:**
+```python
+def list_windows():
+    """Enumerate all visible top-level windows and print them to stdout."""
+    if sys.stdout is None:
+        return
+    # ... rest of function ...
+```
+
+**Status:** ⬜ **Pending**
+
+### 2.13 Collapse duplicate exception blocks in `_request_urllib` (PR Review Log 5, Claim 6)
+
+**File:** [`logic/anki_connect.py:155-168`](logic/anki_connect.py:155)
+
+**Why:** `urllib.error.URLError` and `(OSError, TimeoutError)` handlers have identical bodies — same logging pattern, same `_set_error` call, same `return None`. This is maintenance debt (any fix to one block must be duplicated to the other).
+
+**Change:** Merge into a single `except` tuple:
+```python
+except (urllib.error.URLError, OSError, TimeoutError) as exc:
+    if quiet:
+        logger.debug("[Anki] Poll failed: %s", exc)
+    else:
+        logger.warning("[Anki] Request failed: %s", exc)
+    self._set_error(f"Transport error: {exc}")
+    return None
+```
+
+**Risk:** **None** — identical behavior, less code.
+
+**Status:** ⬜ **Pending**
 
 ---
 
@@ -430,10 +615,12 @@ Already covered in Phase 2.2. ✅
 
 | Phase | Total | ✅ Done | ⬜ Remaining |
 |-------|-------|---------|--------------|
-| 0 — Lock fix | 1 | 0 | 1 |
+| 0 — Lock fix + aftermath | 4 | **1** | **3** (stale docstring, is_available clobber, is_available mislabel) |
 | 1 — Safety | 9 | **9** | **0** 🔥 |
-| 2 — Cleanup | 8 | **8** | **0** 🔥 |
+| 2 — Cleanup | 13 | **10** | **3** (add_note dead code, stdout None guard, duplicate exception blocks) |
 | 3 — Settings | 4 | 3 | 1 (QTimer hygiene, optional) |
 | 4 — Packaging | 3 | 2 | 1 (PyInstaller spec) |
 | 5 — Documentation | 3 | 2 | 1 (port validation doc — no settings.md exists) |
-| **Total** | **28** | **24** | **4** |
+| **Total** | **36** | **27** | **9** |
+
+> **Note:** `settings.json` revert (paddle_line_count: 3→1, auto_capture: false→true) is a pre-commit cleanup step, not a phase item.
