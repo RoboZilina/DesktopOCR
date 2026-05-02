@@ -1,45 +1,13 @@
 import asyncio
-import ctypes
-import ctypes.wintypes
-import sys
 import os
+import sys
 
 # Ensure the root directory is on the path so we can import core module successfully
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import cv2
 from core.capture import ScreenCapture
-
-def list_windows():
-    user32 = ctypes.windll.user32
-    EnumWindows = user32.EnumWindows
-    GetWindowText = user32.GetWindowTextW
-    GetWindowTextLength = user32.GetWindowTextLengthW
-    IsWindowVisible = user32.IsWindowVisible
-
-    WNDENUMPROC = ctypes.WINFUNCTYPE(
-        ctypes.wintypes.BOOL,
-        ctypes.wintypes.HWND,
-        ctypes.wintypes.LPARAM,
-    )
-
-    windows = []
-
-    def foreach_window(hwnd, l_param):
-        if IsWindowVisible(hwnd):
-            length = GetWindowTextLength(hwnd)
-            if length > 0:
-                buff = ctypes.create_unicode_buffer(length + 1)
-                GetWindowText(hwnd, buff, length + 1)
-                windows.append((int(hwnd), buff.value))
-        return True
-
-    EnumWindows(WNDENUMPROC(foreach_window), 0)
-    
-    print("--- Visible Windows ---")
-    for hwnd, title in windows:
-        print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {title}")
-    print("-----------------------")
+from core.win_utils import list_windows
 
 async def main():
     list_windows()

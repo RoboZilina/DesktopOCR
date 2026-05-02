@@ -51,6 +51,24 @@ A PR review of the Phase 1 patches raised 5 new issues + 1 pre-existing bug. Res
 
 ---
 
+## PR Review Evaluation Log 2 — 2026-05-02
+
+A second PR review of the Phase 1 remainder patches raised 4 new issues. Results:
+
+| # | Claim | Verdict | Risk | Actionable? |
+|---|-------|---------|------|-------------|
+| 1 | `sys` imported locally inside `_load_guide` — inconsistent with `main_window.py` cleanup | ✅ **TRUE** — `import sys` at `user_guide_dialog.py:38` is same pattern just cleaned up in Phase 1.9 | **Very Low** — dead code path (current callers always pass `guide_path`) | Yes — consistent with Phase 1.9 |
+| 2 | `set_host_port()` clamps `port` but does not validate `host` — `http://None:8765` | ✅ **TRUE** — type annotation says `host: str` but no runtime guard; all callers pass validated strings from `load_settings()` | **Very Low** — signal is typed `pyqtSignal(str)`, callers use settings_state values already validated as strings | Optional defense-in-depth |
+| 3 | No `anki_enabled` type guard — `"anki_enabled": "true"` (string) passes through unchecked | ⚠️ **PARTIALLY TRUE** — downstream uses truthiness (`not x`), so behavior is correct; but type consistency is compromised if string is saved back to JSON | **Very Low** — string `"true"` is truthy, `setChecked()` and signal emit work correctly via PyQt coercion | Optional — add `isinstance(x, bool)` guard |
+| 4 | `settings.json` `auto_read_selection` flipped from `true` to `false` | ❌ **NOT A BUG** — `DEFAULT_SETTINGS` at `main.py:31` has `"auto_read_selection": False`; this is the user's own `settings.json`, not modified by our patches. The value was likely already `false` before this PR. | None | No |
+
+**Actionable items:**
+1. **Move `import sys` to module level in `user_guide_dialog.py`** — consistent with Phase 1.9 in `main_window.py`. Low priority (dead code).
+2. **Add `anki_enabled` type guard in `load_settings()`** — optional consistency fix. Add after line 105: `if not isinstance(settings.get("anki_enabled"), bool): settings["anki_enabled"] = False`
+3. **Add host validation in `set_host_port()`** — optional defense-in-depth. Add: `if not isinstance(host, str): host = "localhost"`
+
+---
+
 ## Phase 0 — Must Correct (🚨) [1 item]
 
 ### 0.1 Fix `threading.Lock` — Use atomic assignment, NOT `asyncio.Lock`
@@ -414,8 +432,8 @@ Already covered in Phase 2.2. ✅
 |-------|-------|---------|--------------|
 | 0 — Lock fix | 1 | 0 | 1 |
 | 1 — Safety | 9 | **9** | **0** 🔥 |
-| 2 — Cleanup | 8 | 6 | 2 (json.loads duplicate, consolidate list_windows) |
+| 2 — Cleanup | 8 | **8** | **0** 🔥 |
 | 3 — Settings | 4 | 3 | 1 (QTimer hygiene, optional) |
 | 4 — Packaging | 3 | 2 | 1 (PyInstaller spec) |
 | 5 — Documentation | 3 | 2 | 1 (port validation doc — no settings.md exists) |
-| **Total** | **28** | **22** | **6** |
+| **Total** | **28** | **24** | **4** |

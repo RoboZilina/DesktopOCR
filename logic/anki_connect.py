@@ -84,10 +84,10 @@ class AnkiConnect:
         body = json.dumps(payload, ensure_ascii=False)
 
         if _HAS_AIOHTTP:
-            return await self._request_aiohttp(body, timeout, quiet=quiet)
-        return await self._request_urllib(body, timeout, quiet=quiet)
+            return await self._request_aiohttp(action, body, timeout, quiet=quiet)
+        return await self._request_urllib(action, body, timeout, quiet=quiet)
 
-    async def _request_aiohttp(self, body: str, timeout: float, *,
+    async def _request_aiohttp(self, action: str, body: str, timeout: float, *,
                                quiet: bool = False) -> dict[str, Any] | None:
         # Create a fresh session per request to avoid connection-pool reuse
         # issues with AnkiConnect's HTTP server (which may close keep-alive
@@ -106,7 +106,6 @@ class AnkiConnect:
                         return None
                     data = await resp.json()
                     if "error" in data and data["error"] is not None:
-                        action = json.loads(body).get("action", "unknown")
                         error_text = str(data["error"])[:80]
                         logger.warning("[Anki] Error in '%s': %s", action, error_text)
                         self._set_error(f"Anki rejected '{action}': {error_text}")
@@ -124,7 +123,7 @@ class AnkiConnect:
                 self._set_error(f"Invalid JSON from Anki: {str(exc)[:80]}")
                 return None
 
-    async def _request_urllib(self, body: str, timeout: float, *,
+    async def _request_urllib(self, action: str, body: str, timeout: float, *,
                               quiet: bool = False) -> dict[str, Any] | None:
         """Fallback using urllib.request wrapped in a thread-pool executor.
 
@@ -148,7 +147,6 @@ class AnkiConnect:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     if "error" in data and data["error"] is not None:
-                        action = json.loads(body).get("action", "unknown")
                         error_text = str(data["error"])[:80]
                         logger.warning(
                             "[Anki] Error in '%s': %s",

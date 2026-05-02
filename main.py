@@ -14,6 +14,7 @@ from datetime import datetime
 import cv2
 import numpy as np
 
+from core.win_utils import list_windows
 from tts.manager import TTSManager
 from tts.openjtalk_backend import OpenJTalkBackend
 from tts.edge_tts_backend import EdgeTTSBackend
@@ -165,37 +166,6 @@ def _parse_region_arg(region_arg: str) -> tuple[int, int, int, int]:
     if w <= 0 or h <= 0:
         raise ValueError("Region width and height must be > 0")
     return x, y, w, h
-
-def list_windows():
-    user32 = ctypes.windll.user32
-    EnumWindows = user32.EnumWindows
-    GetWindowText = user32.GetWindowTextW
-    GetWindowTextLength = user32.GetWindowTextLengthW
-    IsWindowVisible = user32.IsWindowVisible
-
-    WNDENUMPROC = ctypes.WINFUNCTYPE(
-        ctypes.wintypes.BOOL,
-        ctypes.wintypes.HWND,
-        ctypes.wintypes.LPARAM,
-    )
-
-    windows = []
-    def foreach_window(hwnd, l_param):
-        if IsWindowVisible(hwnd):
-            length = GetWindowTextLength(hwnd)
-            if length > 0:
-                buff = ctypes.create_unicode_buffer(length + 1)
-                GetWindowText(hwnd, buff, length + 1)
-                windows.append((int(hwnd), buff.value))
-        return True
-
-    EnumWindows(WNDENUMPROC(foreach_window), 0)
-    
-    print("--- Visible Windows ---")
-    for hwnd, title in windows:
-        safe_title = title.encode(sys.stdout.encoding, errors="replace").decode(sys.stdout.encoding)
-        print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {safe_title}")
-    print("-----------------------")
 
 async def main(hwnd, gui_mode=True, window=None, window_title=""):
     args = parse_args()
