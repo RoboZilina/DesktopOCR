@@ -143,6 +143,7 @@ class TranscriptionTray(QWidget):
         self._speak_btn.setFixedHeight(28)
         self._speak_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self._speak_btn.setCursor(Qt.CursorShape.ArrowCursor)
+        self._speak_btn.setToolTip("Speak selection, or full OCR text if nothing selected")
         self._speak_btn.clicked.connect(
             lambda: self.tts_requested.emit(
                 self._sel_text.toPlainText() or self._ocr_text.toPlainText()
@@ -153,6 +154,7 @@ class TranscriptionTray(QWidget):
         self._translate_btn = QPushButton("Translate")
         self._translate_btn.setFixedHeight(28)
         self._translate_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self._translate_btn.setToolTip("Translate selection, or full OCR text if nothing selected")
         self._translate_btn.clicked.connect(
             lambda: self.translate_requested.emit(
                 self._sel_text.toPlainText() or self._ocr_text.toPlainText()

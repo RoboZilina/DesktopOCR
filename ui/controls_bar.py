@@ -49,6 +49,7 @@ class ControlsBar(QWidget):
         self._menu_btn.setCheckable(True)
         self._menu_btn.setFixedHeight(34)
         self._menu_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._menu_btn.setToolTip("Open side menu (settings, Anki, guides)")
         self._menu_btn.toggled.connect(self._on_menu_toggled)
         self._menu_open = False
         layout.addWidget(self._menu_btn)

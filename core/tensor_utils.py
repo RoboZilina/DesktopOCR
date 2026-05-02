@@ -1,4 +1,5 @@
 import os
+import threading
 
 import cv2
 import numpy as np
@@ -9,7 +10,6 @@ import numpy as np
 # calls. If we ever introduce true parallel Paddle passes, switch to per-call
 # allocations (or guard the buffers with explicit synchronization).
 DET_LIMIT_SIDE_LEN = int(os.getenv("DESKTOCR_DET_LIMIT_SIDE_LEN", "1024"))
-import threading
 
 DET_BUFFER = None
 DET_BUFFER_SHAPE: tuple[int, int, int, int] | None = None

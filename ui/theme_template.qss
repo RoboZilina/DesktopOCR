@@ -148,8 +148,3 @@ QFrame#title {
    and is used as a header, even if it has no objectName.
    This is the universal fallback.
 */
-
-QWidget:has(> QLabel) {
-    background: transparent;
-    border: none;
-}

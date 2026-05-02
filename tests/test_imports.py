@@ -20,7 +20,12 @@ MODULES = [
     "core.engine_manager",
     "core.windows_ocr",
     "core.vision",
+    "core.capture_pipeline",
+    "core.translation.manager",
     "logic.validator",
+    "logic.anki_connect",
+    "logic.anki_card_builder",
+    "tts.manager",
 ]
 
 WIDTH = 28

@@ -1,16 +1,11 @@
 import asyncio
-
 import logging
-
+import os
 import pathlib
 
-import os
-
-import numpy as np
-
-import onnxruntime as ort
-
 import cv2
+import numpy as np
+import onnxruntime as ort
 
 from core.tensor_utils import (
     image_to_det_tensor,

@@ -34,5 +34,13 @@ dist/
 .DS_Store
 Thumbs.db
 
+# Debug / runtime output directories
+debug_crops/
+debug_ocr/
+run_logs/
+
+# PyInstaller spec files
+*.spec
+
 # Local settings (contains API keys)
 settings.json

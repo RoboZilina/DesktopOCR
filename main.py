@@ -81,6 +81,7 @@ def load_settings() -> dict:
         except Exception as exc:  # noqa: BLE001
             logging.getLogger(__name__).warning("Failed to load settings: %s", exc)
     if settings.get("text_size") not in ("small", "medium", "large"):
+        logging.getLogger(__name__).warning("Invalid text_size '%s', resetting to 'medium'", settings.get("text_size"))
         settings["text_size"] = "medium"
     # Defensive type guards — settings.json may be hand-edited with invalid types
     if not isinstance(settings.get("anki_host"), str):
@@ -109,11 +110,6 @@ def save_settings(settings: dict) -> None:
         tmp.replace(SETTINGS_PATH)
     except Exception as exc:  # noqa: BLE001
         logging.getLogger(__name__).warning("Failed to save settings: %s", exc)
-
-def _compute_diff(frame: np.ndarray, ref: np.ndarray | None) -> float:
-    # Removed per C-1: Unify diff logic
-    pass
-
 
 def _manual_crop(frame: np.ndarray, region: tuple[int, int, int, int]) -> np.ndarray:
     """Crop frame to region (x, y, w, h).  Clamps to frame bounds."""
