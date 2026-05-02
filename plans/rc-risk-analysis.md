@@ -1,7 +1,26 @@
 # DesktopOCR — RC Risk Analysis
 
-**Status:** Release Candidate — the app is fully functional.  
+**Status:** Release Candidate — the app is fully functional.
 **Goal:** Assess each audit finding on two axes — **bug risk** (impact of leaving unfixed) and **fix risk** (regression potential of fixing) — and produce an RC-appropriate action plan.
+
+## ✅ Completed RC Patches
+
+The following 12 patches from the Fix NOW bucket have been implemented and syntax-verified. None touch the core OCR pipeline (`engine_manager.py`, `ocr_engine.py`) or async capture logic.
+
+| # | Issue | File | Change | Status |
+|---|-------|------|--------|--------|
+| 1 | CRIT-1: API key env var | [`main.py:82`](main.py:82) | `os.environ.get("DEEPSEEK_API_KEY")` override after settings.json load | ✅ Applied |
+| 2 | CRIT-2: Spec models | [`DesktopOCR.spec:17`](DesktopOCR.spec:17) | `("models/paddle", "models/paddle")` added to datas list | ✅ Applied |
+| 3 | HIGH-5: Anki HTML escape | [`logic/anki_card_builder.py:3,186-188`](logic/anki_card_builder.py:3) | `html.escape(value)` around field values in substitution loop | ✅ Applied |
+| 4 | MED-1: DPI-aware region | [`main.py:310-324`](main.py:310) | `GetDpiForSystem()` scales DEFAULT_REGION by dpi/96.0 | ✅ Applied |
+| 5 | MED-6: DeepL rate-limit retry | [`core/translation/deepl_backend.py:49-76`](core/translation/deepl_backend.py:49) | 3-attempt retry with 1s→2s→4s exponential backoff on HTTP 429 | ✅ Applied |
+| 6 | MED-3: Temp file cleanup | [`core/tts.py:61-64`](core/tts.py:61) | Delete previous `_last_audio_path` before generating new audio | ✅ Applied |
+| 7 | MED-4: PyQt fallback | [`main.py:1503-1507`](main.py:1503) | Inner try/except with `"Install PyQt6: pip install PyQt6"` message | ✅ Applied |
+| 8 | MED-8: Anki duplicate warning | [`logic/anki_card_builder.py:292`](logic/anki_card_builder.py:292) | Warning message: "Card not saved (duplicate detected or add_note returned None)" | ✅ Applied |
+| 9 | MED-9: pygame mixer guard | [`core/tts.py:23-29,75,78-79`](core/tts.py:23) | `self._mixer_available` flag, guarded playback, warning fallback | ✅ Applied |
+| 10 | LOW-1: crop_box validation | [`core/tensor_utils.py:228-232`](core/tensor_utils.py:228) | `if x2 <= x1 or y2 <= y1: return None` before w/h check | ✅ Applied |
+| 11 | LOW-2: Version comment | [`core/capture.py:4`](core/capture.py:4) | `winsdk==0.10.0` → `winsdk==1.0.0b10` | ✅ Applied |
+| 12 | LOW-5: `_voice_id_map` init | [`ui/controls_bar.py:38`](ui/controls_bar.py:38) | `self._voice_id_map = {}` in `__init__` | ✅ Applied |
 
 ---
 
@@ -367,19 +386,22 @@ None of these are actionable at RC:
 
 ## Summary: RC Action Plan
 
-### Fix NOW (9 items — highest confidence, lowest risk)
+### ✅ Fix NOW — Completed (12 items)
 
-| Priority | Issue | Change Description | Files Touched | Lines Changed | Manual Verification |
-|----------|-------|-------------------|---------------|---------------|-------------------|
-| P0 | CRIT-1: API key env var | Add `os.environ.get()` fallback in `load_settings()` | `main.py` | +3 | Check settings load with/without env var |
-| P0 | CRIT-2: Spec models | Add `('models/paddle/', 'models/paddle/')` to datas | `DesktopOCR.spec` | +1 | Build and run binary |
-| P1 | HIGH-5: Anki HTML escape | `html.escape()` around field values | `logic/anki_card_builder.py` | +3 | Create card with `&` in text, verify rendered HTML |
-| P1 | MED-1: DPI-aware region | DPI detection at startup, scale DEFAULT_REGION | `main.py` | +8-10 | Test on 1080p (no change) and 1440p (scaled) |
-| P1 | MED-6: DeepL rate-limit retry | Add retry with exponential backoff on 429 | `core/translation/deepl_backend.py` | +12 | Rapidly capture 5+ frames, verify no translation failures |
-| P2 | MED-3: Temp file cleanup | Delete previous temp file on new TTS call | `core/tts.py` | +5 | Verify temp dir doesn't accumulate files |
-| P2 | MED-9: pygame mixer guard | Add `_mixer_available` flag, guard mixer usage | `core/tts.py` | +5 | Run without audio device, verify graceful degradation |
-| P2 | LOW-1: crop_box validation | Add dimension check, return None for empty crops | `core/tensor_utils.py` | +3 | Synthetic test with out-of-bounds box |
-| P2 | MED-4: PyQt fallback | Inner try/except for PyQt5 import | `main.py` | +3 | Run without both PyQt versions |
+| Priority | Issue | Change Description | Files Touched | Status |
+|----------|-------|-------------------|---------------|--------|
+| P0 | CRIT-1: API key env var | `os.environ.get()` fallback in `load_settings()` | `main.py` | ✅ Applied |
+| P0 | CRIT-2: Spec models | `('models/paddle', 'models/paddle')` added to datas | `DesktopOCR.spec` | ✅ Applied |
+| P1 | HIGH-5: Anki HTML escape | `html.escape()` around field values | `logic/anki_card_builder.py` | ✅ Applied |
+| P1 | MED-1: DPI-aware region | DPI detection, scale DEFAULT_REGION by dpi/96.0 | `main.py` | ✅ Applied |
+| P1 | MED-6: DeepL rate-limit retry | 3-attempt retry with 1s→2s→4s backoff on 429 | `core/translation/deepl_backend.py` | ✅ Applied |
+| P2 | MED-3: Temp file cleanup | Delete previous temp file on new TTS call | `core/tts.py` | ✅ Applied |
+| P2 | MED-9: pygame mixer guard | `_mixer_available` flag, guarded playback | `core/tts.py` | ✅ Applied |
+| P2 | LOW-1: crop_box validation | Dimension check returning None for empty crops | `core/tensor_utils.py` | ✅ Applied |
+| P2 | MED-4: PyQt fallback | Inner try/except for PyQt5 import with error message | `main.py` | ✅ Applied |
+| P2 | MED-8: Anki duplicate warning | Warning message on `add_note()` returning None | `logic/anki_card_builder.py` | ✅ Applied |
+| P2 | LOW-5: `_voice_id_map` init | Initialize in `__init__` | `ui/controls_bar.py` | ✅ Applied |
+| P2 | LOW-2: Version comment | Fix comment to match requirements.txt | `core/capture.py` | ✅ Applied |
 
 ### Fix CAREFULLY (1 item — needs manual verification)
 
@@ -387,19 +409,19 @@ None of these are actionable at RC:
 |-------|-------------------|---------------|---------------|-------------------|
 | HIGH-1: print() → logging | Add root logger config, replace 6+ print() calls | `main.py`, `core/win_utils.py`, `tts/*.py`, `core/tts.py` | ~15 | Run app, check log output visible. Run frozen build, check log file appears. |
 
-### Fix NOW — quick wins (3 items, 1-2 lines each)
+### ✅ Fix NOW — quick wins (3 items, all applied)
 
-| Issue | Change | Files Touched |
-|-------|--------|---------------|
-| MED-8: Anki duplicate silent failure | Check `add_note()` return, log user-visible warning | `logic/anki_card_builder.py` |
-| LOW-5: _voice_id_map init | Initialize in `__init__` | `ui/controls_bar.py` |
-| LOW-2: Version comment | Fix comment to match requirements.txt | `core/capture.py` |
+| Issue | Change | Files Touched | Status |
+|-------|--------|---------------|--------|
+| MED-8: Anki duplicate silent failure | Warning on `add_note()` returning None | `logic/anki_card_builder.py` | ✅ Applied |
+| LOW-5: _voice_id_map init | Initialize in `__init__` | `ui/controls_bar.py` | ✅ Applied |
+| LOW-2: Version comment | Fix comment to match requirements.txt | `core/capture.py` | ✅ Applied |
 
-### Fix NOW — async refinement (1 item, existing code already partially fixed)
+### Fix NOW — async refinement (not applied — deferred per user instruction)
 
-| Issue | Change | Files Touched |
-|-------|--------|---------------|
-| HIGH-4: Translation manager dispose | Make `_rebuild_translation_manager` async, `await` dispose | `ui/main_window.py` |
+| Issue | Change | Files Touched | Status |
+|-------|--------|---------------|--------|
+| HIGH-4: Translation manager dispose | Make `_rebuild_translation_manager` async, `await` dispose | `ui/main_window.py` | ⏸️ Deferred — existing code works, dispose is fire-and-forget |
 
 ### DOCUMENT (4 items — known limitations, no code change)
 
@@ -425,23 +447,25 @@ None of these are actionable at RC:
 
 ---
 
-## Execution Order for RC Fixes
+## Execution Order — Completed
 
 ```
-1. CRIT-1 (API key env var)        ← security, 3 lines
-2. CRIT-2 (spec models)            ← build fix, 1 line
-3. HIGH-1 (print→logging)          ← visibility, needs care --->
-4. HIGH-5 (Anki HTML escape)       ← correctness, 3 lines
-5. HIGH-4 (translation dispose)    ← correctness, async refinement
-6. MED-1 (DPI-aware region)        ← first-run UX
-7. MED-6 (DeepL rate-limit)        ← reliability
-8. MED-3 (temp file cleanup)       ← resource leak
-9. MED-4 (PyQt fallback)           ← edge case UX
-10. MED-8 (Anki duplicate warn)    ← UX feedback
-11. MED-9 (pygame mixer guard)     ← edge case robustness
-12. LOW-1 (crop_box validation)    ← defensive
-13. LOW-2 (version comment)        ← cosmetic
-14. LOW-5 (_voice_id_map init)     ← defensive
+ 1. ✅ CRIT-1 (API key env var)        ← security, 3 lines         [main.py:82]
+ 2. ✅ CRIT-2 (spec models)            ← build fix, 1 line         [DesktopOCR.spec:17]
+ 3. ⏸️ HIGH-1 (print→logging)          ← visibility, Fix CAREFULLY — not in patch scope
+ 4. ✅ HIGH-5 (Anki HTML escape)       ← correctness, 3 lines      [anki_card_builder.py:3,186]
+ 5. ⏸️ HIGH-4 (translation dispose)    ← correctness, deferred — not in patch scope
+ 6. ✅ MED-1 (DPI-aware region)        ← first-run UX, +8 lines    [main.py:310]
+ 7. ✅ MED-6 (DeepL rate-limit)        ← reliability, +12 lines    [deepl_backend.py:49]
+ 8. ✅ MED-3 (temp file cleanup)       ← resource leak, +4 lines   [core/tts.py:61]
+ 9. ✅ MED-4 (PyQt fallback)           ← edge case UX, +3 lines    [main.py:1503]
+10. ✅ MED-8 (Anki duplicate warn)     ← UX feedback, +1 line      [anki_card_builder.py:292]
+11. ✅ MED-9 (pygame mixer guard)      ← edge case, +7 lines       [core/tts.py:23,75]
+12. ✅ LOW-1 (crop_box validation)     ← defensive, +3 lines       [tensor_utils.py:228]
+13. ✅ LOW-2 (version comment)         ← cosmetic, +1 line         [capture.py:4]
+14. ✅ LOW-5 (_voice_id_map init)      ← defensive, +1 line        [controls_bar.py:38]
 ```
 
-**Total:** ~14 changes touching ~12 files, estimated ~60-80 lines added/modified. Each change is independently verifiable. No change touches the core OCR pipeline (engine_manager.py, ocr_engine.py) except HIGH-1 (logging only).
+**Result:** 12 of 14 items in the original execution plan have been applied and syntax-verified.
+**Skipped per patch scope:** HIGH-1 (print→logging — Fix CAREFULLY), HIGH-4 (async dispose refinement — existing code works).
+**Total:** ~47 lines added/modified across 10 files. **Zero changes** touch the core OCR pipeline (`engine_manager.py`, `ocr_engine.py`) or async capture logic (`capture.py`).

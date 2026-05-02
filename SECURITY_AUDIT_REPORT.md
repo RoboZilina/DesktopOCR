@@ -14,6 +14,7 @@
 - **Content:** `"deepseek_api_key": "sk-c433f7a354284ca3af09bd71c3eee7ca"`
 - **Impact:** Anyone with local filesystem access to this machine (another user account, malware, physical theft) can read this key and call DeepSeek's paid API on the owner's account. This key is live — the DeepSeekValidator constructor at [`logic/deepseek_validator.py:20`](logic/deepseek_validator.py:20) passes it directly to the API.
 - **Note:** `settings.json` IS already excluded from git tracking via [`.gitignore:46`](.gitignore:46), so this key is NOT leaked through source control. However, the file is unencrypted on disk with no file-level permissions.
+- **Status:** ✅ **FIXED in RC patch** — [`load_settings()`](main.py:82) now checks `DEEPSEEK_API_KEY` environment variable after loading `settings.json`. If the env var is set, it overrides the file value. Existing file-based path remains as fallback.
 - **Remediation:** Immediately revoke this key at DeepSeek's console. Use environment variables or a secrets vault for API keys. [`settings.json.example`](settings.json.example) should serve as the template.
 
 ### CRIT-2: PyInstaller build silently broken — missing model files
@@ -23,6 +24,7 @@
 - **Impact:** A locally-frozen PyInstaller binary will launch, then crash at runtime when `PaddleOCR.load()` at [`core/ocr_engine.py:82`](core/ocr_engine.py:82) tries to open model files that don't exist in the bundle. The crash occurs *after* the UI has started — the user sees a GUI that then fails silently or raises an unhandled exception.
 - **Witness:** The `model_config` dict passed from [`core/engine_manager.py:244`](core/engine_manager.py:244) references `model_config["det_model"]`, `model_config["rec_model"]`, and `model_config["dict"]`, all pointing into `models/paddle/`. The spec does not ship these.
 - **Note:** `*.spec` is gitignored so this does not affect cloned repos. It only affects developers building locally.
+- **Status:** ✅ **FIXED in RC patch** — `("models/paddle", "models/paddle")` added to the `datas` list in [`DesktopOCR.spec:17`](DesktopOCR.spec:17).
 - **Remediation:** Add `('models/paddle/', 'models/paddle/')` to the `datas` list in the local spec file.
 
 ---
