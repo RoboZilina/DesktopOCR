@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 def list_windows():
-    """Enumerate all visible top-level windows and print them to stdout."""
+    """Enumerate all visible top-level windows and log them."""
     user32 = ctypes.windll.user32
     EnumWindows = user32.EnumWindows
     GetWindowText = user32.GetWindowTextW

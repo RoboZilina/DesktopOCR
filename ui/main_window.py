@@ -455,13 +455,10 @@ class MainWindow(QMainWindow):
         """Dispose all backends in a translation manager."""
         if manager is None:
             return
-        backends = getattr(manager, "_backends", [])
-        for backend in backends:
-            if hasattr(backend, "dispose"):
-                try:
-                    await backend.dispose()
-                except Exception:  # noqa: BLE001
-                    pass
+        try:
+            await manager.dispose()
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning("[MainWindow] Translation manager dispose failed: %s", exc)
 
     def _on_translation_enabled_changed(self, enabled: bool) -> None:
         """Enable/disable the translate button in the tray."""

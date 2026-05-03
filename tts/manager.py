@@ -49,8 +49,8 @@ class TTSManager:
                 if audio.max() > 1.0 or audio.min() < -1.0:
                     audio = audio / 32768.0
                 sd.play(audio, samplerate=sr, blocking=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Audio playback failed: %s", exc)
 
     def stop(self):
         if hasattr(self.active, "stop"):

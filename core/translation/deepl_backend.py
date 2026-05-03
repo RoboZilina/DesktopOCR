@@ -89,13 +89,20 @@ class DeepLBackend(TranslationBackend):
                             continue
                         logger.warning("[DeepL] HTTP 429 — rate limited, all retries exhausted")
                         return ""
+                    if resp.status in (502, 503, 504):
+                        if attempt < max_retries - 1:
+                            backoff = 2 ** attempt
+                            logger.warning("[DeepL] HTTP %d (server error), retrying in %ds (attempt %d/%d)", resp.status, backoff, attempt + 1, max_retries)
+                            await asyncio.sleep(backoff)
+                            continue
+                        logger.warning("[DeepL] HTTP %d — server error, all retries exhausted", resp.status)
+                        return ""
                     if resp.status != 200:
                         logger.warning(
                             "[DeepL] HTTP %d from endpoint", resp.status
                         )
                         return ""
-
-                data = await resp.json(content_type=None)
+                    data = await resp.json(content_type=None)
 
                 # Modern format: result.texts[].chunks[].sentences[]
                 result_obj = data.get("result", {})

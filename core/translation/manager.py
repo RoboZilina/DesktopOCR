@@ -100,5 +100,5 @@ class TranslationManager:
             if hasattr(backend, "dispose"):
                 try:
                     await backend.dispose()
-                except Exception:  # noqa: BLE001
-                    pass
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Backend dispose failed for %s: %s", type(backend).__name__, exc)
