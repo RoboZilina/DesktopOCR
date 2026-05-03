@@ -11,7 +11,7 @@ DesktopOCR evolved from the personalOCR-Cloudflare codebase as a ground-up nativ
 - **Anki Integration** — One-click flashcard creation from captured text via AnkiConnect; configurable templates with readings and translation
 - **Word Frequency & Kanji Analysis** — Built-in frequency tables annotate OCR results with word rarity underlines and kanji difficulty background tints
 - **AI-Powered Validation & Translation** — DeepSeek and OpenAI validators for on-demand text correction and translation
-- **Multi-Backend Text-to-Speech** — Edge TTS (cloud, natural voices), COEIROINK (local, anime-style), VoiceVox (local), OpenJTalk (local); runtime backend switching
+- **Multi-Backend Text-to-Speech** — Edge TTS (cloud, natural voices), OpenJTalk (local), COEIROINK (local, requires server); runtime backend switching
 - **Windows OCR Fallback** — Built-in Windows.Media.Ocr for Japanese text recognition without external models
 - **Google Vision OCR Cloud Fallback** — Optional cloud-based OCR when local models struggle
 - **System-Wide Global Hotkey** — Configurable hotkey to trigger OCR from any application
@@ -60,5 +60,5 @@ DesktopOCR evolved from the personalOCR-Cloudflare codebase as a ground-up nativ
 - **No MangaOCR**: MangaOCR not ported — DesktopOCR focuses on horizontal game text
 - **No Tesseract**: Only PaddleOCR and Windows OCR available
 - **Model Size**: ~166 MB bundled PaddleOCR models (FP32); no quantization applied
-- **Local TTS Setup**: COEIROINK and VoiceVox require separate local engine installations
+- **Local TTS Setup**: COEIROINK requires a separate local HTTP server (127.0.0.1:50032); VoiceVox is a stub and not yet implemented
 - **API Keys Required**: DeepSeek, OpenAI, Google Vision, and Edge TTS need user-provided keys or internet
