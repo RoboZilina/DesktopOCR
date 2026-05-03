@@ -21,5 +21,8 @@ edge-tts==7.0.0
 pygame==2.6.1
 sounddevice==0.5.2
 
+# Offline translation (JA→EN fallback when no internet)
+argostranslate==1.9.6
+
 # Packaging
 pyinstaller

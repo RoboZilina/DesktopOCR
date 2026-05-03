@@ -11,6 +11,16 @@ DesktopOCR v1.0.0-rc3
 
 > **Note:** EasyOCR is currently hidden from the engine selector and is not available in this release. Only PaddleOCR and Windows OCR are shown in the UI.
 
+### Bundled Models
+
+The offline ArgosTranslate JA→EN model (`assets/argos/ja_en.argosmodel`, ~111 MB) is excluded from Git due to GitHub's 100 MB file-size limit. It is bundled at build time via `build.ps1` (`--include-data-dir=assets=assets`).
+
+Developers can obtain the model by running:
+```bash
+argospm install translate-ja_en
+```
+Or download it manually from the [Argos package index](https://github.com/argosopentech/argos-translate).
+
 ## Highlighting System
 
 DesktopOCR includes an optional multi-layer highlighting system that helps you quickly identify word frequency and kanji difficulty while reading Japanese text.

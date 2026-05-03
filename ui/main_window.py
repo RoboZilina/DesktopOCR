@@ -26,6 +26,7 @@ from ui.side_menu import SideMenu
 from ui.components import StatusBar
 from ui.user_guide_dialog import UserGuideDialog
 from core.translation.manager import TranslationManager
+from core.translation.argos_backend import ArgosTranslatorBackend
 from core.translation.google_backend import GoogleTranslateBackend
 from core.translation.mymemory_backend import MyMemoryBackend
 
@@ -133,11 +134,11 @@ class MainWindow(QMainWindow):
         self.side_menu.theme_changed.connect(self._apply_theme)
         self.side_menu.hide_requested.connect(self._hide_side_menu)
 
-        # Translation manager — Google primary, MyMemory fallback
-        self._libre_url = "http://localhost:5000"
+        # Translation manager — Google primary, MyMemory fallback, Argos offline last
         self._translation_manager = TranslationManager([
             GoogleTranslateBackend(),
             MyMemoryBackend(),
+            ArgosTranslatorBackend(),
         ])
         self._auto_copy = False
         self._auto_read_selection = False
@@ -342,7 +343,7 @@ class MainWindow(QMainWindow):
         backend = getattr(self, "_translation_backend", "auto") or "auto"
         label_map = {
             "auto": "Auto",
-            "deepl": "DeepL",
+            "mymemory": "MyMemory",
             "google": "Google",
         }
         label = label_map.get(backend, backend.title())
@@ -433,8 +434,7 @@ class MainWindow(QMainWindow):
             self.transcription_tray.set_translating(False)
         else:
             self.transcription_tray.set_translation_error(
-                "Translation failed — check internet connection or "
-                "start LibreTranslate locally."
+                "Translation failed — check internet or bundled translation model."
             )
             self.transcription_tray.set_translating(False)
 
@@ -472,13 +472,16 @@ class MainWindow(QMainWindow):
         if old_manager is not None:
             asyncio.create_task(self._dispose_translation_manager(old_manager))
         backend_id = getattr(self, '_translation_backend', 'auto')
-        url = self._libre_url
         if backend_id == "mymemory":
             backends = [MyMemoryBackend()]
         elif backend_id == "google":
             backends = [GoogleTranslateBackend()]
         else:  # "auto"
-            backends = [GoogleTranslateBackend(), MyMemoryBackend()]
+            backends = [
+                GoogleTranslateBackend(),
+                MyMemoryBackend(),
+                ArgosTranslatorBackend(),
+            ]
         self._translation_manager = TranslationManager(backends)
         _logger.info(
             "[MainWindow] Translation manager rebuilt: backend=%s",
@@ -489,13 +492,6 @@ class MainWindow(QMainWindow):
         """Rebuild manager with the selected backend(s)."""
         self._translation_backend = backend_id
         self._rebuild_translation_manager()
-
-    def _on_libre_url_changed(self, url: str) -> None:
-        """Store new URL and rebuild manager if libre is involved."""
-        self._libre_url = url or "http://localhost:5000"
-        backend_id = getattr(self, '_translation_backend', 'auto')
-        if backend_id == "auto":
-            self._rebuild_translation_manager()
 
     def set_auto_copy(self, enabled: bool) -> None:
         self._auto_copy = bool(enabled)

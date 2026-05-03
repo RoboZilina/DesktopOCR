@@ -26,7 +26,7 @@ class SideMenu(QWidget):
     tray_height_changed      = pyqtSignal(str)
     theme_changed            = pyqtSignal(str)  # "auto" | "dark" | "light"
     translation_enabled_changed  = pyqtSignal(bool)
-    translation_backend_changed  = pyqtSignal(str)  # "auto" | "deepl" | "libre"
+    translation_backend_changed  = pyqtSignal(str)  # "auto" | "google" | "mymemory"
     auto_translate_selection_changed = pyqtSignal(bool)
     openai_validator_enabled_changed = pyqtSignal(bool)
     openai_api_key_changed       = pyqtSignal(str)
@@ -937,7 +937,7 @@ class SideMenu(QWidget):
             backend_id = "auto"  # safe fallback — matches DEFAULT_SETTINGS
         for bid, btn in self._backend_btns.items():
             btn.setChecked(bid == backend_id)
-        # LibreTranslate is hidden for now, so URL field stays hidden
+        # ArgosTranslate is the offline fallback — no URL config needed
         if emit_signal:
             self.translation_backend_changed.emit(backend_id)
 

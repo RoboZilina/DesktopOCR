@@ -29,11 +29,11 @@ class MyMemoryBackend(TranslationBackend):
     name: str = "MyMemory"
 
     def __init__(self) -> None:
-        self._session = aiohttp.ClientSession(timeout=_TIMEOUT)
+        self._session: aiohttp.ClientSession | None = None
 
     def _get_session(self) -> aiohttp.ClientSession:
-        """Return the session, re-creating it if closed (e.g. after dispose)."""
-        if self._session.closed:
+        """Return the session, re-creating it if closed or disposed."""
+        if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=_TIMEOUT)
         return self._session
 

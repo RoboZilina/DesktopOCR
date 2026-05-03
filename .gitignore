@@ -71,4 +71,7 @@ tools/
 # Compressed archives
 *.zip
 
+# Bundled models (GitHub 100 MB limit)
+assets/argos/*.argosmodel
+
 

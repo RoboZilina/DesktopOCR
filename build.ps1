@@ -12,6 +12,7 @@ Write-Host "Running Nuitka build..."
     --include-data-dir=docs=docs `
     --include-data-dir=ui=ui `
     --include-data-file=settings.json.example=settings.json.example `
+    --include-data-dir=assets=assets `
     --output-dir=build `
     --output-filename=DesktopOCR.exe `
     --windows-disable-console

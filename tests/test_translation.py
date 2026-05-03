@@ -3,7 +3,7 @@
 Run with:  python tests/test_translation.py
 
 No PyQt6 or UI imports -- standalone asyncio only.
-All 5 tests print their result; failures print a clear message.
+Tests the active backend chain: Google → MyMemory → ArgosTranslate.
 """
 
 import asyncio
@@ -18,87 +18,132 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf-8-s
 # Ensure project root is on the path so core.translation can be imported
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from core.translation.deepl_backend import DeepLBackend
-from core.translation.libre_backend import LibreTranslateBackend
+from core.translation.google_backend import GoogleTranslateBackend
+from core.translation.mymemory_backend import MyMemoryBackend
+from core.translation.argos_backend import ArgosTranslatorBackend
 from core.translation.manager import TranslationManager
 
+SAMPLE_TEXT = "これはテストです。"
+
 
 # ------------------------------------------------------------------------------
-# Test 1 -- DeepL availability
+# Test 1 -- Google availability
 # ------------------------------------------------------------------------------
-async def test_deepl_availability():
-    print("\n[Test 1] DeepL availability check...")
-    backend = DeepLBackend()
+async def test_google_availability():
+    print("\n[Test 1] Google Translate availability check (needs internet)...")
+    backend = GoogleTranslateBackend()
     result = await backend.is_available()
-    print(f"  DeepL available: {result}")
+    print(f"  Google available: {result}")
     await backend.dispose()
     return result
 
 
 # ------------------------------------------------------------------------------
-# Test 2 -- DeepL translation
+# Test 2 -- Google translation
 # ------------------------------------------------------------------------------
-async def test_deepl_translation():
-    print("\n[Test 2] DeepL translation: 'konnichiwa' (Japanese) ...")
-    # Small delay so we don't immediately 429 after the availability probe
-    await asyncio.sleep(1.0)
-    backend = DeepLBackend()
-    input_text = "\u3053\u3093\u306b\u3061\u306f"  # konnichiwa
-    result = await backend.translate(input_text)
-    print(f"  Input:  {input_text!r}")
+async def test_google_translation():
+    print(f"\n[Test 2] Google Translate: {SAMPLE_TEXT!r} ...")
+    await asyncio.sleep(0.5)
+    backend = GoogleTranslateBackend()
+    result = await backend.translate(SAMPLE_TEXT)
     print(f"  Result: {result!r}")
     if result:
         print("  Status: PASSED")
     else:
-        print("  Status: FAILED (empty result -- check internet connection)")
+        print("  Status: SKIPPED (no internet -- expected offline)")
     await backend.dispose()
     return result
 
 
 # ------------------------------------------------------------------------------
-# Test 3 -- LibreTranslate availability (expected False if not running)
+# Test 3 -- MyMemory availability
 # ------------------------------------------------------------------------------
-async def test_libre_availability():
-    print("\n[Test 3] LibreTranslate availability check (expected False if not running)...")
-    backend = LibreTranslateBackend()
+async def test_mymemory_availability():
+    print("\n[Test 3] MyMemory availability check (needs internet)...")
+    backend = MyMemoryBackend()
     result = await backend.is_available()
-    print(f"  LibreTranslate available: {result}")
-    print("  Status: PASSED (availability is informational)")
+    print(f"  MyMemory available: {result}")
     await backend.dispose()
     return result
 
 
 # ------------------------------------------------------------------------------
-# Test 4 -- Manager with both backends
+# Test 4 -- MyMemory translation
 # ------------------------------------------------------------------------------
-async def test_manager_translation():
-    print("\n[Test 4] Manager.translate with DeepL + LibreTranslate...")
-    await asyncio.sleep(1.0)
-    manager = TranslationManager([
-        DeepLBackend(),
-        LibreTranslateBackend(),
-    ])
-    input_text = "\u306a\u306e\u306b\u3001\u4eca"  # nanoni, ima
-    result = await manager.translate(input_text)
-    print(f"  Input:        {input_text!r}")
-    print(f"  Result:       {result!r}")
-    print(f"  Backend used: {manager.last_used_backend}")
+async def test_mymemory_translation():
+    print(f"\n[Test 4] MyMemory Translate: {SAMPLE_TEXT!r} ...")
+    await asyncio.sleep(0.5)
+    backend = MyMemoryBackend()
+    result = await backend.translate(SAMPLE_TEXT)
+    print(f"  Result: {result!r}")
     if result:
         print("  Status: PASSED")
     else:
-        print("  Status: FAILED (all backends returned empty -- check internet)")
+        print("  Status: SKIPPED (no internet -- expected offline)")
+    await backend.dispose()
+    return result
+
+
+# ------------------------------------------------------------------------------
+# Test 5 -- Argos availability (offline, should always pass)
+# ------------------------------------------------------------------------------
+async def test_argos_availability():
+    print("\n[Test 5] ArgosTranslate availability (offline -- bundled model)...")
+    backend = ArgosTranslatorBackend()
+    result = await backend.is_available()
+    print(f"  Argos available: {result}")
+    assert result, "Argos bundled model should always be available"
+    print("  Status: PASSED")
+    await backend.dispose()
+    return result
+
+
+# ------------------------------------------------------------------------------
+# Test 6 -- Argos translation (offline, uses bundled model)
+# ------------------------------------------------------------------------------
+async def test_argos_translation():
+    print(f"\n[Test 6] ArgosTranslate: {SAMPLE_TEXT!r} ...")
+    backend = ArgosTranslatorBackend()
+    result = await backend.translate(SAMPLE_TEXT)
+    print(f"  Result: {result!r}")
+    assert result, "Argos translation should return non-empty result"
+    assert "test" in result.lower(), f"Expected 'test' in translation: {result!r}"
+    print("  Status: PASSED")
+    await backend.dispose()
+    return result
+
+
+# ------------------------------------------------------------------------------
+# Test 7 -- Manager with active backend chain
+# ------------------------------------------------------------------------------
+async def test_manager_translation():
+    print("\n[Test 7] Manager.translate with Google + MyMemory + Argos...")
+    await asyncio.sleep(0.5)
+    manager = TranslationManager([
+        GoogleTranslateBackend(),
+        MyMemoryBackend(),
+        ArgosTranslatorBackend(),
+    ])
+    result = await manager.translate(SAMPLE_TEXT)
+    print(f"  Input:        {SAMPLE_TEXT!r}")
+    print(f"  Result:       {result!r}")
+    print(f"  Backend used: {manager.last_used_backend}")
+    # At minimum, Argos should succeed (offline fallback)
+    assert result, "Manager should return translation (Argos is offline fallback)"
+    print("  Status: PASSED")
     await manager.dispose()
     return result
 
 
 # ------------------------------------------------------------------------------
-# Test 5 -- Empty string handling
+# Test 8 -- Empty string handling
 # ------------------------------------------------------------------------------
 async def test_empty_input():
-    print("\n[Test 5] Empty string handling...")
+    print("\n[Test 8] Empty string handling...")
     manager = TranslationManager([
-        DeepLBackend(),
-        LibreTranslateBackend(),
+        GoogleTranslateBackend(),
+        MyMemoryBackend(),
+        ArgosTranslatorBackend(),
     ])
     result = await manager.translate("")
     assert result == "", f"Expected empty string, got: {result!r}"
@@ -107,6 +152,9 @@ async def test_empty_input():
     result_ws = await manager.translate("   ")
     assert result_ws == "", f"Expected empty string for whitespace, got: {result_ws!r}"
     print("  Whitespace-only test: PASSED")
+
+    # Verify no backend was used for empty input
+    print(f"  Backend used for empty input: {manager.last_used_backend}")
     await manager.dispose()
 
 
@@ -118,15 +166,24 @@ async def main():
     print("DesktopOCR Translation Pipeline -- Manual Test")
     print("=" * 60)
 
-    await test_deepl_availability()
-    await test_deepl_translation()
-    await test_libre_availability()
+    results: dict[str, bool] = {}
+
+    results["google_avail"] = await test_google_availability()
+    results["google_trans"] = bool(await test_google_translation())
+    results["mymemory_avail"] = await test_mymemory_availability()
+    results["mymemory_trans"] = bool(await test_mymemory_translation())
+    results["argos_avail"] = await test_argos_availability()
+    results["argos_trans"] = bool(await test_argos_translation())
     await test_manager_translation()
     await test_empty_input()
 
     print("\n" + "=" * 60)
-    print("All tests complete.")
+    print("Summary:")
+    for k, v in results.items():
+        status = "✅" if v else "⚠️"
+        print(f"  {status} {k}: {v}")
     print("=" * 60)
+    print("All tests complete.")
 
 
 if __name__ == "__main__":
