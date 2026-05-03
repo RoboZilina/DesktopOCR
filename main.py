@@ -594,6 +594,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
             def _on_auto_copy_changed(enabled: bool):
                 settings_state["auto_copy"] = enabled
+                window.set_auto_copy(enabled)
                 _do_save()
             window.side_menu.auto_copy_changed.connect(_on_auto_copy_changed)
 
@@ -767,6 +768,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
             window.side_menu.set_auto_copy(
                 settings_state.get("auto_copy", True), emit_signal=False
             )
+            if hasattr(window, "set_auto_copy"):
+                window.set_auto_copy(settings_state.get("auto_copy", True))
             if hasattr(window.side_menu, "set_preview_visible"):
                 window.side_menu.set_preview_visible(
                     settings_state.get("preview_visible", True), emit_signal=False
@@ -1267,6 +1270,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 # Bump generation to invalidate any in-flight OCR result,
                 # forcing a fresh capture once the current one finishes.
                 _capture_gen += 1
+                pipeline.invalidate_generation()  # short-circuit in-flight capture_once
                 ocr_trigger.set()
             window.recapture_requested.connect(_on_recapture)
             ref_frame: np.ndarray | None = None

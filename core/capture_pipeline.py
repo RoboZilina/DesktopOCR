@@ -101,10 +101,6 @@ class CapturePipeline:
                 res["confidence"] = conf if conf is not None else 0.0
                 self._update_stats(meta)
 
-                if not text:
-                    self._maybe_log_stats()
-                    return None
-
                 self._last_result = text
                 self._stats["chars_emitted"] += len(text)
                 self._maybe_log_stats()

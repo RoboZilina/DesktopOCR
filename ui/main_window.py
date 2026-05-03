@@ -139,6 +139,7 @@ class MainWindow(QMainWindow):
             DeepLBackend(),
             GoogleTranslateBackend(),
         ])
+        self._auto_copy = False
         self._auto_read_selection = False
         self._auto_translate_selection = False
         self._translation_enabled = True
@@ -496,6 +497,9 @@ class MainWindow(QMainWindow):
         if backend_id == "auto":
             self._rebuild_translation_manager()
 
+    def set_auto_copy(self, enabled: bool) -> None:
+        self._auto_copy = bool(enabled)
+
     def _on_auto_read_selection_changed(self, enabled: bool) -> None:
         self._auto_read_selection = bool(enabled)
 
@@ -514,6 +518,8 @@ class MainWindow(QMainWindow):
         text = (self._pending_selection_text or "").strip()
         if not text:
             return
+        if self._auto_copy:
+            QApplication.clipboard().setText(text)
         if self._auto_read_selection:
             self.tts_requested.emit(text)
         if self._auto_translate_selection and self._translation_enabled:

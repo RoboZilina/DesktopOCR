@@ -167,7 +167,7 @@ class TranscriptionTray(QWidget):
         self._sel_text = QTextEdit()
         self._sel_text.setReadOnly(True)
         self._sel_text.setStyleSheet(self._text_style())
-        self._selection_placeholder = "Highlight text in the OCR pane and it will copy here automatically."
+        self._selection_placeholder = "Highlight text in the OCR pane to populate this selection box."
         self._sel_text.setPlaceholderText(self._selection_placeholder)
         self._sel_scroll = QScrollArea()
         self._sel_scroll.setWidgetResizable(True)
