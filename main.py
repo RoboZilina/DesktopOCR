@@ -1109,8 +1109,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     elif window is not None:
                         reason = anki.last_error or "Card save failed"
                         window.set_status("Error", f"Anki: {reason}")
-                    if window is not None:
-                        asyncio.get_event_loop().call_later(3.0, lambda: _safe_clear_status(window))
+                    # StatusBar auto-clears "Done"/"Error" natively — no manual timer needed.
                 finally:
                     _anki_busy = False
 
@@ -1134,14 +1133,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 task = asyncio.create_task(coro)
                 _anki_tasks.add(task)
                 task.add_done_callback(_anki_tasks.discard)
-
-            def _safe_clear_status(win) -> None:
-                """Set status to Ready, guarding against destroyed QObject peer."""
-                try:
-                    if win is not None:
-                        win.set_status("Ready", "")
-                except RuntimeError:
-                    pass  # QObject C++ peer was destroyed
 
             window._anki_timer = QTimer(window)
             window._anki_timer.timeout.connect(_safe_check_anki)
@@ -1216,7 +1207,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 else:
                     reason = anki.last_error or f"Cannot reach Anki at {anki.base_url}"
                     window.set_status("Error", reason)
-                asyncio.get_event_loop().call_later(3.0, lambda: _safe_clear_status(window))
+                # StatusBar auto-clears "Done"/"Error" natively — no manual timer needed.
             window.side_menu.anki_test_requested.connect(
                 lambda: _safe_task(_on_anki_test_requested())
             )
@@ -1267,6 +1258,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     QMessageBox.warning(window, "No area selected",
                                         "Please select a source window first.")
                     return
+                logger.info("[Recapture] Button clicked — bumping gen to %d, invalidating pipeline, firing trigger",
+                            _capture_gen + 1)
                 # Bump generation to invalidate any in-flight OCR result,
                 # forcing a fresh capture once the current one finishes.
                 _capture_gen += 1
@@ -1324,6 +1317,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                                 continue
                             _capture_gen += 1
                             this_gen = _capture_gen
+                            logger.info("[OCR] Auto trigger consumed (gen=%d)", this_gen)
                         else:
                             # Manual mode: wait for Re-capture button only
                             try:
@@ -1332,18 +1326,22 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                             except asyncio.TimeoutError:
                                 continue
                             this_gen = None
+                            logger.info("[OCR] Manual trigger consumed (re-capture)")
 
                         if stop_event.is_set():
                             break
 
-                        if window is not None:
-                            window.set_status("Processing…", "")
+                        # No "Processing…" status needed — the user knows they
+                        # triggered a recapture; we'll show "Done" with summary
+                        # when results arrive.
                         ocr_started = time.perf_counter()
                         res = await pipeline.capture_once(line_count=_selected_line_count())
                         elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
 
                         # Discard stale result if a newer trigger fired during OCR
                         if this_gen is not None and this_gen != _capture_gen:
+                            logger.info("[OCR] Stale result discarded (this_gen=%d, current_gen=%d)",
+                                        this_gen, _capture_gen)
                             continue
 
                         if res is not None:
@@ -1360,19 +1358,25 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                             timestamp = datetime.now().strftime("%H:%M:%S")
                             logger.info("[%s] [%s] [Conf: %.2f] %s", timestamp, engine_id, conf, text)
                             if text:
-                                window.set_ocr_result(text, float(conf), engine_id, timestamp)
+                                if window is not None:
+                                    window.set_ocr_result(text, float(conf), engine_id, timestamp)
                             if settings_state["auto_copy"] and text:
                                 from PyQt6.QtWidgets import QApplication
                                 QApplication.clipboard().setText(text)
-                                
-                            window.side_menu.update_openai_usage(openai_validator.cost_estimate_chars)
+
+                            if window is not None:
+                                window.side_menu.update_openai_usage(openai_validator.cost_estimate_chars)
 
                             if window is not None:
                                 summary_text = _build_status_summary(meta=meta, conf=float(conf or 0.0), elapsed_ms=elapsed_ms)
                                 window.set_status("Done", summary_text)
                         else:
-                            if window is not None:
+                            logger.info("[OCR] capture_once returned None (%.1f ms)",
+                                        elapsed_ms)
+                            if is_manual and window is not None:
+                                # Manual mode: show "Ready" so user knows the action completed
                                 window.set_status("Ready", "")
+                            # Auto mode: silent — unchanged frames produce no status noise
 
                         # Simple cooldown — does NOT touch ocr_trigger, so stabilize /
                         # Re-capture triggers are preserved for the main consumer
