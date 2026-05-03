@@ -135,6 +135,11 @@ class DeepLBackend(TranslationBackend):
 
             except aiohttp.ClientError as exc:
                 logger.warning("[DeepL] Network error: %s", exc)
+                if attempt < max_retries - 1:
+                    backoff = 2 ** attempt
+                    logger.warning("[DeepL] Network error, retrying in %ds (attempt %d/%d)", backoff, attempt + 1, max_retries)
+                    await asyncio.sleep(backoff)
+                    continue
                 return ""
             except Exception as exc:  # noqa: BLE001
                 logger.warning("[DeepL] Unexpected error: %s", exc)

@@ -2,13 +2,14 @@
 
 import ctypes
 import ctypes.wintypes
+import logging
 import sys
+
+logger = logging.getLogger(__name__)
 
 
 def list_windows():
     """Enumerate all visible top-level windows and print them to stdout."""
-    if sys.stdout is None:
-        return
     user32 = ctypes.windll.user32
     EnumWindows = user32.EnumWindows
     GetWindowText = user32.GetWindowTextW
@@ -33,9 +34,7 @@ def list_windows():
 
     EnumWindows(WNDENUMPROC(foreach_window), 0)
 
-    print("--- Visible Windows ---")
+    logger.info("--- Visible Windows ---")
     for hwnd, title in windows:
-        encoding = sys.stdout.encoding or "utf-8"
-        safe_title = title.encode(encoding, errors="replace").decode(encoding)
-        print(f"HWND: {hwnd:<10} (0x{hwnd:08X}) | Title: {safe_title}")
-    print("-----------------------")
+        logger.info("HWND: %-10d (0x%08X) | Title: %s", hwnd, hwnd, title)
+    logger.info("-----------------------")

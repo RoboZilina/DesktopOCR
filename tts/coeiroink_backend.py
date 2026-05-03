@@ -1,7 +1,11 @@
+import logging
+
 import requests
 import numpy as np
 
 from .base import TTSBackend
+
+logger = logging.getLogger(__name__)
 
 
 class COEIROINKBackend(TTSBackend):
@@ -45,11 +49,12 @@ class COEIROINKBackend(TTSBackend):
                     style_name = style_map.get(sid, style.get("styleName", sid))
                     voices.append((f"{name} ({style_name})", sid))
             return voices
-        except Exception:
+        except Exception as exc:
+            logger.warning("list_voices failed: %s", exc)
             return []
 
     def set_voice(self, voice_id):
-        print(f"[COEIROINK] Voice style set to: {voice_id}")
+        logger.debug("Voice style set to: %s", voice_id)
         self.style_id = voice_id
 
     def speak(self, text):
@@ -74,7 +79,7 @@ class COEIROINKBackend(TTSBackend):
             )
 
             if response.content == b"Internal Server Error":
-                print("[COEIROINK] Internal Server Error (invalid speaker/style?)")
+                logger.warning("Internal Server Error (invalid speaker/style?)")
                 return None
 
             response.raise_for_status()
@@ -84,10 +89,10 @@ class COEIROINKBackend(TTSBackend):
             return pcm, sr
 
         except requests.exceptions.ConnectionError:
-            print("[COEIROINK] Engine not running")
+            logger.warning("Engine not running")
             return None
         except requests.exceptions.RequestException as e:
-            print(f"[COEIROINK] Error: {e}")
+            logger.error("Error: %s", e)
             return None
 
     def _wav_bytes_to_pcm(self, wav_bytes):

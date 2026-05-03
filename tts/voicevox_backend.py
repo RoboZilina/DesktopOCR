@@ -1,11 +1,15 @@
+import logging
+
 from .base import TTSBackend
+
+logger = logging.getLogger(__name__)
 
 
 class VoiceVoxBackend(TTSBackend):
     name = "voicevox"
 
     def speak(self, text: str) -> None:
-        print("[TTS] VoiceVox speak:", text)
+        logger.debug("VoiceVox speak: %s", text)
 
     def stop(self) -> None:
         pass

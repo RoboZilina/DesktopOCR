@@ -31,12 +31,13 @@
 
 ## 2. High-Priority Issues
 
-### HIGH-1: `print()` calls in frozen build — silent failure
+### ✅ FIXED: `print()` calls in frozen build — silent failure
 
-- **Files:** [`main.py:1341`](main.py:1341), [`main.py:1455`](main.py:1455), [`core/win_utils.py:10`](core/win_utils.py:10), [`tts/openjtalk_backend.py:59`](tts/openjtalk_backend.py:59), [`tts/voicevox_backend.py:10`](tts/voicevox_backend.py:10), [`tts/manager.py:28`](tts/manager.py:28)
-- **Problem:** `console=False` in [`DesktopOCR.spec`](DesktopOCR.spec) means no console window exists in the frozen build. Every `print()` call silently does nothing. These are used for: debug logging, device enumeration results (`list_windows` at [`core/win_utils.py:10`](core/win_utils.py:10)), TTS debug output, and pipeline timing.
-- **Impact:** Users cannot see debug output or error messages. The print at [`core/win_utils.py:10`](core/win_utils.py:10) — which enumerates visible windows so the user can pick a target — will produce no output in the frozen build.
+- **Files:** [`main.py`](main.py), [`core/win_utils.py`](core/win_utils.py), [`tts/manager.py`](tts/manager.py), [`tts/openjtalk_backend.py`](tts/openjtalk_backend.py), [`tts/voicevox_backend.py`](tts/voicevox_backend.py), [`tts/coeiroink_backend.py`](tts/coeiroink_backend.py)
+- **Problem:** `console=False` in [`DesktopOCR.spec`](DesktopOCR.spec) means no console window exists in the frozen build. Every `print()` call silently does nothing. These are used for: debug logging, device enumeration results (`list_windows` at [`core/win_utils.py:36`](core/win_utils.py:36)), TTS debug output, and pipeline timing.
+- **Impact:** Users cannot see debug output or error messages. The print at [`core/win_utils.py:36`](core/win_utils.py:36) — which enumerates visible windows so the user can pick a target — will produce no output in the frozen build.
 - **Remediation:** Replace all `print()` calls with `logging.getLogger(...)` calls, or set `console=True` for debug builds.
+- **Status:** ✅ **FIXED in RC patch round** — All `print()` calls replaced with `logger.info/debug/warning/error()` across 6 files. Root logger was already configured at [`main.py:246`](main.py:246). WAV debug save in [`tts/openjtalk_backend.py:79-84`](tts/openjtalk_backend.py:79) gated behind `DESKTOCR_TTS_DEBUG_WAV=1`. Progress dots (4 cosmetic `.` calls) intentionally kept as `print()` — they gracefully no-op in frozen build.
 
 ### HIGH-2: `cv2.waitKey(0)` behind debug flag — latent risk if debug is enabled
 

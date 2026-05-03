@@ -79,20 +79,24 @@ Fix plan:
 
 ## 2. High-Priority Issues
 
-### HIGH-1: print() calls in frozen build — silent failure
+### ✅ FIXED: print() calls in frozen build — silent failure
 
 | Axis | Rating | Rationale |
 |------|--------|-----------|
-| Bug Risk | **MEDIUM** | `console=False` makes all `print()` invisible. [`core/win_utils.py:10`](core/win_utils.py:10) enumerates windows — in frozen build, user sees empty output. Debug logging during development is blind. Error messages from TTS, pipeline timing are all swallowed. |
-| Fix Risk | **MEDIUM** | Touches **6 files** across `core/`, `tts/`, `main.py`. Each `print()` → `logger.info/debug/warning` is mechanical, BUT: need to ensure root logger is configured at the frozen build entry point [`main.py`](main.py:1492). If logging isn't configured, `logger.warning()` is also silent. The fix must include one-time logger setup. |
+| Bug Risk | **MEDIUM** | `console=False` makes all `print()` invisible. [`core/win_utils.py:36`](core/win_utils.py:36) enumerates windows — in frozen build, user sees empty output. Debug logging during development is blind. Error messages from TTS, pipeline timing are all swallowed. |
+| Fix Risk | **LOW** (downgraded after finding existing `logging.basicConfig`) | Root logger already configured at [`main.py:246`](main.py:246). Each `print()` → `logger.*()` replacement is mechanical across 6 files. No new infrastructure needed. |
 
-**Verdict: Fix CAREFULLY**
+**Verdict: Fix CAREFULLY → Fix NOW** (after finding existing `logging.basicConfig`)
 
-Fix plan:
-- Add root logger configuration at the top of [`main()`](main.py:200) (or the entry-point block at line 1492): `logging.basicConfig(level=logging.INFO, format="...")` — this ensures logging works in both dev and frozen builds.
-- Replace each `print()` with appropriate `logger.*()` call across 6 files.
-- **Risk mitigation:** Each replacement is one line. Verify manually by running `python -c "import logging; logging.basicConfig(); logging.getLogger().warning('test')"` to confirm logging works.
-- **Testing:** Run the app, confirm no new warnings/errors. No automated tests needed.
+**Status: ✅ FIXED in RC patch round**
+
+Changes applied:
+- [`core/win_utils.py`](core/win_utils.py): Added `import logging`, `logger = logging.getLogger(__name__)`. Replaced 3 `print()` calls with `logger.info()`.
+- [`tts/manager.py`](tts/manager.py): Added `import logging`, `logger = logging.getLogger(__name__)`. Replaced 5 `print()` calls with `logger.debug()`.
+- [`tts/openjtalk_backend.py`](tts/openjtalk_backend.py): Added `import logging`, `logger = logging.getLogger(__name__)`. Replaced 13 `print()` calls with appropriate `logger.info/debug/warning/error()`. WAV debug save gated behind `DESKTOCR_TTS_DEBUG_WAV=1`.
+- [`tts/voicevox_backend.py`](tts/voicevox_backend.py): Added `import logging`, `logger = logging.getLogger(__name__)`. Replaced 1 `print()` call with `logger.debug()`.
+- [`tts/coeiroink_backend.py`](tts/coeiroink_backend.py): Added `import logging`, `logger = logging.getLogger(__name__)`. Replaced 4 `print()` calls with appropriate `logger.debug/warning/error()`.
+- [`main.py`](main.py): Replaced 8 `print()` calls with `logger.info()` (engine listing, OCR results, cleanup messages). Kept 4 progress dots as `print()` (cosmetic, gracefully no-op). Kept early-exit error at line 1525 as `print()` (runs before logging setup).
 
 ---
 

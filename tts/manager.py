@@ -1,6 +1,10 @@
+import logging
+
 from .base import TTSBackend
 from .coeiroink_backend import COEIROINKBackend
 from .edge_tts_backend import EdgeTTSBackend
+
+logger = logging.getLogger(__name__)
 
 
 class TTSManager:
@@ -21,11 +25,11 @@ class TTSManager:
 
     def set_backend(self, name: str):
         if name in self.backends:
-            print(f"[TTSManager] Switching backend: {self.active.name} -> {name}")
+            logger.debug("Switching backend: %s -> %s", self.active.name, name)
             self.active = self.backends[name]
 
     def speak(self, text: str):
-        print(f"[TTSManager] speak() active backend: {self.active.name}")
+        logger.debug("speak() active backend: %s", self.active.name)
         result = self.active.speak(text)
         self.last_audio_path = getattr(self.active, "last_audio_path", None)
         if result is None:
@@ -70,12 +74,12 @@ class TTSManager:
         return all_voices
 
     def set_voice(self, voice_id):
-        print(f"[TTSManager] set_voice() received: {voice_id}")
+        logger.debug("set_voice() received: %s", voice_id)
         if "|" in voice_id:
             backend_name, real_id = voice_id.split("|", 1)
-            print(f"[TTSManager] Parsed backend={backend_name}, voice={real_id}")
+            logger.debug("Parsed backend=%s, voice=%s", backend_name, real_id)
             self.set_backend(backend_name)
             voice_id = real_id
-        print(f"[TTSManager] Active backend now: {self.active.name}")
+        logger.debug("Active backend now: %s", self.active.name)
         if hasattr(self.active, "set_voice"):
             self.active.set_voice(voice_id)

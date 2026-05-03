@@ -216,7 +216,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         if args.list_engines:
             print("Available engines:")
             for engine_id in engine_manager.get_supported_engines():
-                print(f"- {engine_id}")
+                print("- %s" % engine_id)
             return
         if args.list_engine_status:
             print("Engine status:")
@@ -232,7 +232,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 if note:
                     suffix_parts.append(f"note={note}")
                 suffix = f" ({', '.join(suffix_parts)})" if suffix_parts else ""
-                print(f"- {engine_id}: state={state}{suffix}")
+                print("- %s: state=%s%s" % (engine_id, state, suffix))
             return
 
     if args.raw_ocr:
@@ -313,13 +313,14 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
     selection_ready = (not gui_mode) or region_was_cli_defined
 
     # Apply DPI scaling to the default region so it works on non-1080p displays
+    # Only applies when no explicit --region or --select-region was provided.
     try:
         import ctypes
         dpi = ctypes.windll.user32.GetDpiForSystem()
         scale = dpi / 96.0
-        if abs(scale - 1.0) > 0.01:
-            DEFAULT_REGION = tuple(int(v * scale) for v in DEFAULT_REGION)
-            logger.info("DPI scaling applied: %d DPI -> scale=%.2f, region=%s", dpi, scale, DEFAULT_REGION)
+        if selected_region is None and abs(scale - 1.0) > 0.01:
+            selected_region = tuple(int(v * scale) for v in DEFAULT_REGION)
+            logger.info("DPI scaling applied: %d DPI -> scale=%.2f, region=%s", dpi, scale, selected_region)
     except Exception:
         pass  # DPI detection is best-effort; fall back to unscaled default
 
@@ -1353,7 +1354,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                                 window.set_ocr_boxes(boxes)
                                 window.set_ocr_canvas_frames(raw_frame, preprocessed_frame, boxes)
                             timestamp = datetime.now().strftime("%H:%M:%S")
-                            print(f"\n[{timestamp}] [{engine_id}] [Conf: {conf:.2f}] {text}")
+                            logger.info("[%s] [%s] [Conf: %.2f] %s", timestamp, engine_id, conf, text)
                             if text:
                                 window.set_ocr_result(text, float(conf), engine_id, timestamp)
                             if settings_state["auto_copy"] and text:
@@ -1439,9 +1440,11 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 if text and text != last_shown_text:
                     last_shown_text = text
                     timestamp = datetime.now().strftime("%H:%M:%S")
-                    print(
-                        f"\n[{timestamp}] [Engine: {engine_id}] [Conf: {conf:.2f}] "
-                        f"[Val: {'on' if v_enabled else 'off'}, changed={v_changed}, ok={v_valid}] {text}"
+                    logger.info(
+                        "[%s] [Engine: %s] [Conf: %.2f] "
+                        "[Val: %s, changed=%s, ok=%s] %s",
+                        timestamp, engine_id, conf,
+                        "on" if v_enabled else "off", v_changed, v_valid, text,
                     )
                 else:
                     print(".", end="", flush=True)
@@ -1461,9 +1464,11 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 v_valid = bool(validator.get("valid_hint", False))
                 engine_id = meta.get("engine", engine_manager.current_id)
                 timestamp = datetime.now().strftime("%H:%M:%S")
-                print(
-                    f"\n[{timestamp}] [Engine: {engine_id}] [Conf: {conf:.2f}] "
-                    f"[Val: {'on' if v_enabled else 'off'}, changed={v_changed}, ok={v_valid}] {text}"
+                logger.info(
+                    "[%s] [Engine: %s] [Conf: %.2f] "
+                    "[Val: %s, changed=%s, ok=%s] %s",
+                    timestamp, engine_id, conf,
+                    "on" if v_enabled else "off", v_changed, v_valid, text,
                 )
             else:
                 # Silently log invalid strings inline mapped natively via terminal dot increments
@@ -1476,7 +1481,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
     except KeyboardInterrupt:
         pass
     finally:
-        print("\nCleaning up resources...")
+        logger.info("Cleaning up resources...")
         cv2.destroyAllWindows()
         capture.stop()
         if google_vision is not None:
@@ -1487,7 +1492,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
         await engine_manager.dispose_all()
         await openai_validator.dispose()
         await deepseek_validator.dispose()
-        print("Stopped.")
+        logger.info("Stopped.")
 
 def _resolve_hwnd_from_arg(value: str, logger: logging.Logger) -> int | None:
     """Parse hex (0x...) or decimal HWND string. Returns None on failure."""
@@ -1521,7 +1526,7 @@ if __name__ == "__main__":
         try:
             from PyQt5.QtWidgets import QApplication, QMessageBox
         except ImportError:
-            print("ERROR: Install PyQt6: pip install PyQt6")
+            print("ERROR: Install PyQt6 or PyQt5")
             sys.exit(1)
     app = QApplication.instance() or QApplication(sys.argv)
 
