@@ -272,11 +272,13 @@ class TranscriptionTray(QWidget):
         self._apply_token_highlighting(self._ocr_text, normalized)
 
     def set_translation(self, text: str):
+        text = text or ""
         self._trans_text.setPlainText(text)
-        font_size = FONT_SIZES.get(
-            getattr(self, '_current_font_size', 'medium'), 18
-        )
-        self._trans_text.setStyleSheet(self._text_style(size=font_size))
+        if self._trans_text.styleSheet():
+            font_size = FONT_SIZES.get(
+                getattr(self, '_current_font_size', 'medium'), 18
+            )
+            self._trans_text.setStyleSheet(self._text_style(size=font_size))
 
     def set_selection_translation(self, text: str):
         normalized = text or ""

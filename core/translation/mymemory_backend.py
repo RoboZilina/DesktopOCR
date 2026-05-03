@@ -29,11 +29,11 @@ class MyMemoryBackend(TranslationBackend):
     name: str = "MyMemory"
 
     def __init__(self) -> None:
-        self._session: aiohttp.ClientSession | None = None
+        self._session = aiohttp.ClientSession(timeout=_TIMEOUT)
 
     def _get_session(self) -> aiohttp.ClientSession:
-        """Return existing session or create a new one lazily."""
-        if self._session is None or self._session.closed:
+        """Return the session, re-creating it if closed (e.g. after dispose)."""
+        if self._session.closed:
             self._session = aiohttp.ClientSession(timeout=_TIMEOUT)
         return self._session
 
@@ -69,6 +69,15 @@ class MyMemoryBackend(TranslationBackend):
                     return ""
 
                 data = await resp.json(content_type=None)
+                response_status = data.get("responseStatus", 200)
+                if response_status != 200:
+                    logger.warning(
+                        "[MyMemory] API responseStatus %d: %s",
+                        response_status,
+                        data.get("responseDetails", ""),
+                    )
+                    return ""
+
                 response_data = data.get("responseData", {})
                 result = (response_data.get("translatedText") or "").strip()
                 if result:
