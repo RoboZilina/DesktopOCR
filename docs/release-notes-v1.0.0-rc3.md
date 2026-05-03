@@ -10,7 +10,8 @@ DesktopOCR evolved from the personalOCR-Cloudflare codebase as a ground-up nativ
 - **DirectML GPU Acceleration** — PaddleOCR runs via onnxruntime-directml on compatible GPUs; graph-optimized models with ~70% fewer nodes for lower latency
 - **Anki Integration** — One-click flashcard creation from captured text via AnkiConnect; configurable templates with readings and translation
 - **Word Frequency & Kanji Analysis** — Built-in frequency tables annotate OCR results with word rarity underlines and kanji difficulty background tints
-- **AI-Powered Validation & Translation** — DeepSeek and OpenAI validators for on-demand text correction and translation
+- **AI-Powered Validation** — DeepSeek and OpenAI validators for on-demand OCR text correction
+- **Multi-Backend Translation** — DeepL (free web endpoint, no API key, needs internet) and Google Translate (needs internet) for Japanese-to-English translation; LibreTranslate (local, not yet bundled)
 - **Multi-Backend Text-to-Speech** — Edge TTS (cloud, natural voices), OpenJTalk (local), COEIROINK (local, requires server); runtime backend switching
 - **Windows OCR Fallback** — Built-in Windows.Media.Ocr for Japanese text recognition without external models
 - **Google Vision OCR Cloud Fallback** — Optional cloud-based OCR when local models struggle
@@ -61,4 +62,5 @@ DesktopOCR evolved from the personalOCR-Cloudflare codebase as a ground-up nativ
 - **No Tesseract**: Only PaddleOCR and Windows OCR available
 - **Model Size**: ~166 MB bundled PaddleOCR models (FP32); no quantization applied
 - **Local TTS Setup**: COEIROINK requires a separate local HTTP server (127.0.0.1:50032); VoiceVox is a stub and not yet implemented
+- **No Offline Translation**: Translation relies on DeepL or Google Translate cloud APIs (internet required); LibreTranslate (self-hosted, no internet) exists as a backend but is not yet bundled
 - **API Keys Required**: DeepSeek, OpenAI, Google Vision, and Edge TTS need user-provided keys or internet
