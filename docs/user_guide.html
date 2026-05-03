@@ -4,16 +4,47 @@
   <meta charset="UTF-8" />
   <title>DesktopOCR User Guide</title>
   <style>
+    /* ── DesktopOCR theme palette ─────────────────────── */
+    :root {
+      --bg: #050506;
+      --panel: #0d0d10;
+      --accent: #10b981;
+      --accent-dim: rgba(16, 185, 129, 0.2);
+      --accent-border: rgba(16, 185, 129, 0.4);
+      --text: #ffffff;
+      --text-dim: #a1a1aa;
+      --text-secondary: #8a8a93;
+      --border: #1f1f23;
+      --warn: #f59e0b;
+      --panic: #ef4444;
+      --code-bg: rgba(255, 255, 255, 0.08);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f8f9fa;
+        --panel: #ffffff;
+        --accent: #059669;
+        --accent-dim: rgba(5, 150, 105, 0.1);
+        --accent-border: rgba(5, 150, 105, 0.3);
+        --text: #111827;
+        --text-dim: #4b5563;
+        --text-secondary: #6b7280;
+        --border: #e2e8f0;
+        --warn: #d97706;
+        --panic: #b91c1c;
+        --code-bg: rgba(0, 0, 0, 0.06);
+      }
+    }
     body {
       font-family: "Segoe UI", Roboto, "Noto Sans", sans-serif;
       margin: 0;
       padding: 24px;
-      background: #14161c;
-      color: #f7f8fb;
+      background: var(--bg);
+      color: var(--text);
       line-height: 1.6;
     }
     h1, h2, h3 {
-      color: #7dd3fc;
+      color: var(--accent);
       margin-top: 24px;
     }
     h1 { font-size: 28px; }
@@ -22,7 +53,7 @@
     p { margin: 0 0 12px 0; }
     ul { margin: 0 0 16px 20px; }
     code {
-      background: rgba(255, 255, 255, 0.08);
+      background: var(--code-bg);
       padding: 2px 4px;
       border-radius: 4px;
       font-family: "JetBrains Mono", Consolas, monospace;
@@ -31,13 +62,13 @@
       display: inline-block;
       padding: 2px 10px;
       border-radius: 999px;
-      background: rgba(125, 211, 252, 0.2);
-      color: #7dd3fc;
+      background: var(--accent-dim);
+      color: var(--accent);
       font-size: 12px;
       margin-right: 8px;
     }
     .section {
-      border-left: 3px solid rgba(125, 211, 252, 0.4);
+      border-left: 3px solid var(--accent-border);
       padding-left: 14px;
       margin-bottom: 24px;
     }
@@ -49,9 +80,9 @@
     }
     .card {
       border-radius: 12px;
-      background: rgba(255, 255, 255, 0.04);
+      background: var(--panel);
       padding: 16px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border);
     }
   </style>
 </head>
@@ -264,7 +295,7 @@
     </ul>
     <p>Audio (if available) is attached as a separate media file linked from the card side chosen in settings.</p>
 
-    <p style="color:#fbbf24;font-weight:bold;">
+    <p style="color:var(--warn);font-weight:bold;">
       ⚠ Anki must be running for AnkiConnect to respond. The 🃏 button is always clickable when visible; if AnkiConnect is unreachable a dialog explains the issue.
     </p>
   </div>
@@ -293,7 +324,7 @@
     <p>This user guide is bundled into PyInstaller builds of DesktopOCR. The file <code>docs/user_guide.html</code> is copied into the executable via <code>--add-data</code> during the build process. If the guide does not open from within the application, verify that your installation includes this file.</p>
   </div>
 
-  <p style="color:#9ca3af; font-size:13px;">
+  <p style="color:var(--text-dim); font-size:13px;">
     Last updated: May 2026 — DesktopOCR pre-release build.
   </p>
 </body>

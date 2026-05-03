@@ -14,7 +14,7 @@ from ui.theme import ThemePalette
 class StatusBar(QStatusBar):
     """Bottom status bar showing app status and summary."""
 
-    AUTO_CLEAR_MS = 2500  # "Done" / "Error" auto-revert to "Ready"
+    AUTO_CLEAR_MS = 5000  # "Done" / "Error" auto-revert to "Ready"
     STATUS_COLORS = {
         "Ready": None,  # falls through to text_dim below
         "Loading": "text_secondary",
@@ -25,8 +25,8 @@ class StatusBar(QStatusBar):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        container = QWidget()
-        layout = QVBoxLayout(container)
+        self._container = QWidget()
+        layout = QVBoxLayout(self._container)
         layout.setContentsMargins(4, 2, 4, 2)
         layout.setSpacing(0)
 
@@ -54,17 +54,15 @@ class StatusBar(QStatusBar):
         )
         layout.addWidget(self._summary_label)
 
-        # Fix the container height so the status bar never shrinks/expands
-        # and pushes the transcription tray above it.
-        line_spacing = self._status_label.fontMetrics().lineSpacing()
-        summary_spacing = self._summary_label.fontMetrics().lineSpacing()
-        container.setMinimumHeight(int(line_spacing * 1.2 + summary_spacing * 1.2 + 4))
+        # Rough initial minimum height using the default font — will be
+        # refined in set_theme() once the actual theme stylesheet is applied.
+        self._update_minimum_height()
 
-        container.setSizePolicy(
+        self._container.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Minimum,
         )
-        self.addPermanentWidget(container, 1)
+        self.addPermanentWidget(self._container, 1)
 
         # Theme state
         self._pal: ThemePalette | None = None
@@ -82,6 +80,8 @@ class StatusBar(QStatusBar):
         # Re-compute colour for the current status key now that palette is known
         self._current_status_color = self._color_for_status(self._current_status_key)
         self._apply_current_style()
+        # Recompute minimum height using the now-applied theme font metrics
+        self._update_minimum_height()
 
     def _color_for_status(self, status_key: str) -> str:
         """Return hex colour for a status key, falling back to text_dim."""
@@ -104,9 +104,24 @@ class StatusBar(QStatusBar):
             f"color: {dim}; font-size: 11px;"
         )
 
+    # ── helpers ────────────────────────────────────────────
+
+    def _update_minimum_height(self) -> None:
+        """Set the container's minimum height based on current font metrics.
+
+        Prevents the status bar from shrinking/expanding and pushing the
+        transcription tray above it as status text changes.
+        """
+        line_spacing = self._status_label.fontMetrics().lineSpacing()
+        summary_spacing = self._summary_label.fontMetrics().lineSpacing()
+        self._container.setMinimumHeight(
+            int(line_spacing * 1.2 + summary_spacing * 1.2 + 4)
+        )
+
     # ── public API ─────────────────────────────────────────
 
     def set_status(self, status_text: str, summary_text: str):
+        summary_text = summary_text or ""
         # Determine colour key
         for key in self.STATUS_COLORS:
             if status_text.startswith(key):

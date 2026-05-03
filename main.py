@@ -1081,7 +1081,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         if path:
                             audio_paths.append(path)
 
-                    logger.info(
+                    logger.debug(
                         "[Anki] _on_anki_requested: calling build_and_send_card with "
                         "ocr_text='%s' (len=%d), selection_text='%s' (len=%d), "
                         "ocr_translation='%s' (len=%d), selection_translation='%s' (len=%d), "
@@ -1258,7 +1258,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     QMessageBox.warning(window, "No area selected",
                                         "Please select a source window first.")
                     return
-                logger.info("[Recapture] Button clicked — bumping gen to %d, invalidating pipeline, firing trigger",
+                logger.debug("[Recapture] Button clicked — bumping gen to %d, invalidating pipeline, firing trigger",
                             _capture_gen + 1)
                 # Bump generation to invalidate any in-flight OCR result,
                 # forcing a fresh capture once the current one finishes.
@@ -1317,7 +1317,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                                 continue
                             _capture_gen += 1
                             this_gen = _capture_gen
-                            logger.info("[OCR] Auto trigger consumed (gen=%d)", this_gen)
+                            logger.debug("[OCR] Auto trigger consumed (gen=%d)", this_gen)
                         else:
                             # Manual mode: wait for Re-capture button only
                             try:
@@ -1326,21 +1326,23 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                             except asyncio.TimeoutError:
                                 continue
                             this_gen = None
-                            logger.info("[OCR] Manual trigger consumed (re-capture)")
+                            logger.debug("[OCR] Manual trigger consumed (re-capture)")
 
                         if stop_event.is_set():
                             break
 
-                        # No "Processing…" status needed — the user knows they
-                        # triggered a recapture; we'll show "Done" with summary
-                        # when results arrive.
+                        # Manual recapture: show "Processing…" immediately so
+                        # the user gets visual confirmation their action was
+                        # registered before the OCR pipeline completes.
+                        if this_gen is None and window is not None:
+                            window.set_status("Processing…", "")
                         ocr_started = time.perf_counter()
                         res = await pipeline.capture_once(line_count=_selected_line_count())
                         elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
 
                         # Discard stale result if a newer trigger fired during OCR
                         if this_gen is not None and this_gen != _capture_gen:
-                            logger.info("[OCR] Stale result discarded (this_gen=%d, current_gen=%d)",
+                            logger.debug("[OCR] Stale result discarded (this_gen=%d, current_gen=%d)",
                                         this_gen, _capture_gen)
                             continue
 
@@ -1371,9 +1373,9 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                                 summary_text = _build_status_summary(meta=meta, conf=float(conf or 0.0), elapsed_ms=elapsed_ms)
                                 window.set_status("Done", summary_text)
                         else:
-                            logger.info("[OCR] capture_once returned None (%.1f ms)",
+                            logger.debug("[OCR] capture_once returned None (%.1f ms)",
                                         elapsed_ms)
-                            if is_manual and window is not None:
+                            if this_gen is None and window is not None:
                                 # Manual mode: show "Ready" so user knows the action completed
                                 window.set_status("Ready", "")
                             # Auto mode: silent — unchanged frames produce no status noise
@@ -1385,6 +1387,8 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
                     except Exception as exc:
                         logger.error("[OCR] Task crashed: %s", exc, exc_info=True)
+                        if this_gen is None and window is not None:
+                            window.set_status("Error", "OCR pipeline crashed")
                         await asyncio.sleep(1.0)
 
             preview_task = asyncio.create_task(_preview_task())
