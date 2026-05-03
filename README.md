@@ -1,6 +1,9 @@
 # DesktopOCR
 OCR for Japanese language content (Visual novels, Manga etc). 2026 Edition
 
+## Version
+DesktopOCR v1.0.0-rc3
+
 ## What's New in This Release
 - Phase 5 documentation updates — improved user guide, port validation notes, PyInstaller bundling info
 - Zero-risk code cleanup (unused imports removed, PEP8 formatting, invalid QSS removed, tooltips added, `.gitignore` expanded)
