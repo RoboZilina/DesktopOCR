@@ -50,6 +50,15 @@ class AnkiConnect:
     def _clear_error(self) -> None:
         self.last_error = None
 
+    def set_error(self, msg: str) -> None:
+        """Set a user-visible error message explaining why the last operation failed.
+
+        This is the public counterpart of ``_set_error()``, intended for callers
+        (e.g. :mod:`~logic.anki_card_builder`) that need to record a failure reason
+        without accessing the pseudo-private method.
+        """
+        self._set_error(msg)
+
     # ------------------------------------------------------------------
     # Session management
     # ------------------------------------------------------------------

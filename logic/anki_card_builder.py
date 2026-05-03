@@ -86,7 +86,7 @@ async def build_and_send_card(
     # Empty-text guard — reject card creation when there is nothing to study.
     if not target_text:
         logger.warning("[Anki] No target text available, skipping card creation")
-        anki._set_error("No target text to save")
+        anki.set_error("No target text to save")
         return False
 
     # ------------------------------------------------------------------
@@ -101,7 +101,7 @@ async def build_and_send_card(
         "ContextText": (ocr_text or "").strip(),
         "ContextTranslation": (ocr_translation or "").strip(),
         "Screenshot": (
-            f'<img src="{screenshot_filename}">' if screenshot_b64 else ""
+            f'<img src="{html.escape(screenshot_filename, quote=True)}">' if screenshot_b64 else ""
         ),
     }
     logger.info(
@@ -128,11 +128,10 @@ async def build_and_send_card(
     # Use ContextText as the fallback content so the front is never blank
     # when there is no selection text.
     if not screenshot_b64 and front_mode in ("screenshot", "screenshot_selection"):
-        logger.info("[Anki] Screenshot unavailable, falling back to text-only front (context=%s)", bool(target_text))
-        if target_text:
-            front_html = "<div class='target'>{TargetText}</div>"
-        else:
-            front_html = "<div class='context'>{ContextText}</div>"
+        # target_text is guaranteed to be truthy here (the empty-text guard above
+        # returns early), so the else branch is unreachable — always use target.
+        logger.info("[Anki] Screenshot unavailable, falling back to text-only front (has_context=%s)", bool(ocr_text))
+        front_html = "<div class='target'>{TargetText}</div>"
     elif front_mode == "screenshot":
         front_html = "{Screenshot}"
     elif front_mode == "screenshot_selection":
@@ -178,15 +177,22 @@ async def build_and_send_card(
     # Anki's card template uses {{FieldName}} syntax in the template itself,
     # but the field values must contain the actual rendered HTML content.
     _subs = {
-        "{Screenshot}": fields.get("Screenshot", ""),
-        "{TargetText}": fields.get("TargetText", ""),
-        "{TargetTranslation}": fields.get("TargetTranslation", ""),
-        "{ContextText}": fields.get("ContextText", ""),
-        "{ContextTranslation}": fields.get("ContextTranslation", ""),
+        "{Screenshot}": fields["Screenshot"],
+        "{TargetText}": fields["TargetText"],
+        "{TargetTranslation}": fields["TargetTranslation"],
+        "{ContextText}": fields["ContextText"],
+        "{ContextTranslation}": fields["ContextTranslation"],
     }
     for placeholder, value in _subs.items():
-        front_html = front_html.replace(placeholder, html.escape(value))
-        back_html = back_html.replace(placeholder, html.escape(value))
+        if placeholder == "{Screenshot}":
+            # Screenshot value is intentionally-constructed HTML (<img src="...">),
+            # so it must NOT be html.escape()'d — that would turn the <img> tag
+            # into <img> literal text instead of rendering the image.
+            front_html = front_html.replace(placeholder, value)
+            back_html = back_html.replace(placeholder, value)
+        else:
+            front_html = front_html.replace(placeholder, html.escape(value))
+            back_html = back_html.replace(placeholder, html.escape(value))
 
     logger.info(
         "[Anki] After substitution: front_html (first 150 chars)='%s', front_html_is_empty=%r",
