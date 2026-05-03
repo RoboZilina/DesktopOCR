@@ -48,3 +48,27 @@ settings.json
 # Optimized Models
 models_optimized/
 
+# Editor metadata
+.qodo/
+.windsurfrules
+
+# Internal documentation / planning
+plans/
+REVIEW_REPORT_*.md
+SECURITY_AUDIT_REPORT.md
+handoff-summary.md
+instructions.md
+tomorrow-plan.md
+desktopocr-*.md
+exe-startup-investigation.md
+
+# Dev scripts
+benchmark_models.py
+scripts/
+reference/
+tools/
+
+# Compressed archives
+*.zip
+
+
