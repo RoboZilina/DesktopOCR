@@ -43,7 +43,7 @@ DEFAULT_SETTINGS = {
     "kanji_pass_enabled": False,
     # Translation settings
     "translation_enabled": True,
-    "translation_backend": "auto",  # "auto" | "deepl" | "google"
+    "translation_backend": "auto",  # "auto" | "mymemory" | "google"
     # OpenAI settings
     "openai_validator_enabled": False,
     "openai_api_key": "",

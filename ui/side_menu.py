@@ -235,7 +235,7 @@ class SideMenu(QWidget):
         translation_layout.addWidget(self._create_section_header("Backend"))
         backend_row = QHBoxLayout()
         self._backend_btns: dict[str, QPushButton] = {}
-        for label, bid in [("Auto", "auto"), ("DeepL", "deepl"), ("Google", "google")]:
+        for label, bid in [("Auto", "auto"), ("MyMemory", "mymemory"), ("Google", "google")]:
             btn = QPushButton(label)
             btn.setProperty("menuClass", "option-btn")
             btn.setCheckable(True)

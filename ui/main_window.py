@@ -26,8 +26,8 @@ from ui.side_menu import SideMenu
 from ui.components import StatusBar
 from ui.user_guide_dialog import UserGuideDialog
 from core.translation.manager import TranslationManager
-from core.translation.deepl_backend import DeepLBackend
 from core.translation.google_backend import GoogleTranslateBackend
+from core.translation.mymemory_backend import MyMemoryBackend
 
 _logger = logging.getLogger(__name__)
 
@@ -133,11 +133,11 @@ class MainWindow(QMainWindow):
         self.side_menu.theme_changed.connect(self._apply_theme)
         self.side_menu.hide_requested.connect(self._hide_side_menu)
 
-        # Translation manager — DeepL primary, Google fallback
+        # Translation manager — Google primary, MyMemory fallback
         self._libre_url = "http://localhost:5000"
         self._translation_manager = TranslationManager([
-            DeepLBackend(),
             GoogleTranslateBackend(),
+            MyMemoryBackend(),
         ])
         self._auto_copy = False
         self._auto_read_selection = False
@@ -473,12 +473,12 @@ class MainWindow(QMainWindow):
             asyncio.create_task(self._dispose_translation_manager(old_manager))
         backend_id = getattr(self, '_translation_backend', 'auto')
         url = self._libre_url
-        if backend_id == "deepl":
-            backends = [DeepLBackend()]
+        if backend_id == "mymemory":
+            backends = [MyMemoryBackend()]
         elif backend_id == "google":
             backends = [GoogleTranslateBackend()]
         else:  # "auto"
-            backends = [DeepLBackend(), GoogleTranslateBackend()]
+            backends = [GoogleTranslateBackend(), MyMemoryBackend()]
         self._translation_manager = TranslationManager(backends)
         _logger.info(
             "[MainWindow] Translation manager rebuilt: backend=%s",

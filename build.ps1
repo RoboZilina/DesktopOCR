@@ -1,26 +1,19 @@
-Write-Host "Cleaning old build folders..."
+$ErrorActionPreference = "Stop"
 
-if (Test-Path "build") {
-    Remove-Item -Recurse -Force "build"
-}
+Write-Host "Cleaning build directory..."
+Remove-Item -Recurse -Force build -ErrorAction SilentlyContinue
 
-Write-Host "Starting Nuitka build..."
+Write-Host "Running Nuitka build..."
+.\.venv\Scripts\python.exe -m nuitka main.py `
+    --standalone `
+    --enable-plugin=pyqt6 `
+    --include-data-dir=resources=resources `
+    --include-data-dir=models=models `
+    --include-data-dir=docs=docs `
+    --include-data-dir=ui=ui `
+    --include-data-file=settings.json.example=settings.json.example `
+    --output-dir=build `
+    --output-filename=DesktopOCR.exe `
+    --windows-disable-console
 
-python -m nuitka main.py `
-  --standalone `
-  --enable-plugin=pyqt6 `
-  --enable-plugin=tk-inter `
-  --include-data-dir=resources=resources `
-  --include-data-dir=models=models `
-  --include-data-dir=docs=docs `
-  --include-data-dir=ui=ui `
-  --include-data-dir=tts=tts `
-  --include-data-file=settings.json.example=settings.json.example `
-  --output-dir=build `
-  --output-filename=DesktopOCR.exe
-
-Write-Host ""
-Write-Host "======================================="
-Write-Host " Build complete!"
-Write-Host " Your app is here: build/main.dist/"
-Write-Host "======================================="
+Write-Host "Build complete."
