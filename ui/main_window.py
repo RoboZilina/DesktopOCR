@@ -8,7 +8,7 @@ from collections import deque
 import numpy as np
 
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QGuiApplication
+from PyQt6.QtGui import QGuiApplication, QIcon
 from PyQt6.QtWidgets import (
     QApplication,
     QHBoxLayout,
@@ -46,6 +46,9 @@ class MainWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("DesktopOCR")
+        icon_path = pathlib.Path(sys.argv[0]).with_name("icon.ico")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.setMinimumSize(900, 600)
         self.resize(1100, 680)
         self.setWindowFlags(Qt.WindowType.Window)
