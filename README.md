@@ -13,13 +13,19 @@ DesktopOCR v1.0.0-rc3
 
 ### Bundled Models
 
-The offline ArgosTranslate JA→EN model (`assets/argos/ja_en.argosmodel`, ~111 MB) is excluded from Git due to GitHub's 100 MB file-size limit. It is bundled at build time via `build.ps1` (`--include-data-dir=assets=assets`).
+The offline ArgosTranslate JA→EN model (~111 MB) is **excluded from Git** due to GitHub's 100 MB file-size limit, but it **is bundled into the pre-built EXE** via `build.ps1` (`--include-data-dir=assets=assets`).
 
-Developers can obtain the model by running:
+**For end users (pre-built EXE):**
+Download the release from [GitHub Releases](https://github.com/RoboZilina/DesktopOCR/releases). The Argos model is included — offline translation works immediately.
+
+**For developers (pip install / source):**
+The model is not in the repository. Install it manually:
 ```bash
 argospm install translate-ja_en
 ```
-Or download it manually from the [Argos package index](https://github.com/argosopentech/argos-translate).
+This installs the model into the Argos package cache, which the app checks at runtime. No need to place it in `assets/argos/` manually.
+
+Or download the `.argosmodel` file from the [Argos package index](https://github.com/argosopentech/argos-translate) and place it at `assets/argos/ja_en.argosmodel`.
 
 ## Highlighting System
 

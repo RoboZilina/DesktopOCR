@@ -62,5 +62,5 @@ DesktopOCR evolved from the personalOCR-Cloudflare codebase as a ground-up nativ
 - **No Tesseract**: Only PaddleOCR and Windows OCR available
 - **Model Size**: ~166 MB bundled PaddleOCR models (FP32); no quantization applied
 - **Local TTS Setup**: COEIROINK requires a separate local HTTP server (127.0.0.1:50032). Download from [coeiroink.com/download](https://coeiroink.com/download) and start the server before launching DesktopOCR — voices only appear in the selector while the server is running. VoiceVox is a stub and not yet implemented
-- **Offline Translation**: ArgosTranslate (bundled JA→EN model) serves as offline fallback when no internet is available. Cloud APIs (MyMemory, Google) are tried first
+- **Offline Translation**: ArgosTranslate serves as offline fallback when no internet is available. The JA→EN model (~111 MB) is bundled into pre-built EXEs. Developers running from source must install the model separately via `argospm install translate-ja_en`. Cloud APIs (MyMemory, Google) are tried first
 - **API Keys Required**: DeepSeek, OpenAI, Google Vision, and Edge TTS need user-provided keys or internet
