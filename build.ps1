@@ -7,6 +7,8 @@ Write-Host "Running Nuitka build..."
 .\.venv\Scripts\python.exe -m nuitka main.py `
     --standalone `
     --enable-plugin=pyqt6 `
+    --module-parameter=torch-disable-jit=yes `
+    --msvc=latest `
     --include-data-dir=resources=resources `
     --include-data-dir=models=models `
     --include-data-dir=docs=docs `
