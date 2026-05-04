@@ -61,6 +61,6 @@ DesktopOCR evolved from the personalOCR-Cloudflare codebase as a ground-up nativ
 - **No MangaOCR**: MangaOCR not ported — DesktopOCR focuses on horizontal game text
 - **No Tesseract**: Only PaddleOCR and Windows OCR available
 - **Model Size**: ~166 MB bundled PaddleOCR models (FP32); no quantization applied
-- **Local TTS Setup**: COEIROINK requires a separate local HTTP server (127.0.0.1:50032); VoiceVox is a stub and not yet implemented
+- **Local TTS Setup**: COEIROINK requires a separate local HTTP server (127.0.0.1:50032). Download from [coeiroink.com/download](https://coeiroink.com/download) and start the server before launching DesktopOCR — voices only appear in the selector while the server is running. VoiceVox is a stub and not yet implemented
 - **Offline Translation**: ArgosTranslate (bundled JA→EN model) serves as offline fallback when no internet is available. Cloud APIs (MyMemory, Google) are tried first
 - **API Keys Required**: DeepSeek, OpenAI, Google Vision, and Edge TTS need user-provided keys or internet

@@ -14,7 +14,7 @@
 | **UI Responsiveness** | Web-based DOM rendering; status pill with progress tracking; browser event loop jank possible | Native PyQt6 desktop UI; dedicated event loop; auto-clearing status bar; always-on-top; no GC pauses |
 | **Hotkeys & Capture** | Browser Screen Capture API requires user gesture; no system-wide hotkeys; auto-capture via video frame polling | System-wide global hotkey (configurable); WinRT Graphics Capture; auto-capture with stabilization delay and frame diff detection |
 | **Validators & Post-Processing** | 8-layer deterministic VN text cleaner (character protection, garbage removal, punctuation normalization, spacing rules, English OCR fixes, VN-specific rules, heuristic safety, final trim) | Deterministic validator (same 8-layer approach) PLUS DeepSeek AI validator and OpenAI validator; noise token filtering, Japanese density scoring, confidence gating |
-| **Translation & TTS** | Browser Web Speech API (limited system voices; no Japanese-specific engines); no translation | Multi-backend TTS: Edge TTS (cloud), OpenJTalk (local), COEIROINK (local, requires server); translation via MyMemory (free web API, no key required, needs internet) or Google Translate (needs internet); ArgosTranslate (offline, bundled) |
+| **Translation & TTS** | Browser Web Speech API (limited system voices; no Japanese-specific engines); no translation | Multi-backend TTS: Edge TTS (cloud), OpenJTalk (local), COEIROINK (local, download from [coeiroink.com/download](https://coeiroink.com/download), requires running server); translation via MyMemory (free web API, no key required, needs internet) or Google Translate (needs internet); ArgosTranslate (offline, bundled) |
 | **Anki Integration** | None | Full AnkiConnect integration — flashcards with OCR text, readings, translation, audio; configurable templates |
 | **Frequency / Highlighting** | None | Word frequency analysis (jp_freq.tsv) and kanji difficulty annotation (kanji_freq.tsv); visual underlines + background tints |
 | **Privacy** | Runs in browser; no server processing; Cloudflare sees IP on model downloads | Fully local; no telemetry; cloud APIs (DeepSeek, OpenAI, Google Vision, Edge TTS) are optional and user-toggled; screenshots never leave machine |
@@ -42,7 +42,7 @@
 - You want **AI-assisted validation** via DeepSeek or OpenAI, and **translation** via MyMemory or Google Translate
 - You need **word frequency and kanji highlighting** for Japanese reading support
 - You require **system-wide hotkeys** and desktop-level screen capture
-- You prefer **multiple TTS options** including local Japanese voice engines (OpenJTalk, COEIROINK)
+- You prefer **multiple TTS options** including local Japanese voice engines (OpenJTalk, COEIROINK from [coeiroink.com/download](https://coeiroink.com/download))
 - Privacy matters — all processing stays on your machine
 
 ### Verdict

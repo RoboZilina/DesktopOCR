@@ -142,8 +142,15 @@
 
     <h3>Translation</h3>
     <ul>
-      <li>Enable translation & auto-translate selection.</li>
+      <li>Enable translation &amp; auto-translate selection.</li>
       <li>Backend choice: Auto (Google primary, MyMemory fallback, ArgosTranslate offline fallback) or choose MyMemory/Google.</li>
+    </ul>
+
+    <h3>Text-to-Speech</h3>
+    <ul>
+      <li><strong>Edge TTS</strong> — cloud voices, works immediately if you have internet.</li>
+      <li><strong>OpenJTalk</strong> — bundled local Japanese TTS. Requires MeCab on PATH for most Windows setups.</li>
+      <li><strong>COEIROINK</strong> — local Japanese voices. Download from <a href="https://coeiroink.com/download">coeiroink.com/download</a>, start the server, then restart DesktopOCR. Voices only appear while the server is running at <code>127.0.0.1:50032</code>.</li>
     </ul>
 
     <h3>AI Validators</h3>
@@ -314,6 +321,7 @@
       <li><strong>Blank translation:</strong> Verify the translation backend is enabled in the side menu and the API key (if required) is set.</li>
       <li><strong>No OCR output:</strong> Confirm a source window is selected and the capture region covers the text area.</li>
       <li><strong>Anki connection fails:</strong> Ensure Anki is running and the AnkiConnect add-on is installed.</li>
+      <li><strong>COEIROINK voices not showing:</strong> Download from <a href="https://coeiroink.com/download">coeiroink.com/download</a>, start the server, and restart DesktopOCR. Voices only appear while the server is running at <code>127.0.0.1:50032</code>.</li>
       <li><strong>User guide not found:</strong> In PyInstaller builds the guide is bundled inside the executable. Reinstall the application if it fails to open.</li>
     </ul>
   </div>

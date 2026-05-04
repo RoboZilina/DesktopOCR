@@ -97,3 +97,16 @@ The app auto-creates a **DesktopOCR** note type with 7 fields:
 > **Note:** Anki must be running for AnkiConnect to respond. The 🃏 button is always clickable when visible; if AnkiConnect is unreachable a dialog explains the issue.
 >
 > **Security note:** The AnkiConnect add-on (`2055492159`) is open-source. You can verify its code on [AnkiWeb](https://ankiweb.net/shared/info/2055492159) or review it locally in Anki's add-ons folder.
+
+## Text-to-Speech
+
+DesktopOCR supports multiple TTS backends. The voice selector in the top bar shows all currently available voices.
+
+| Backend | Type | Requirements |
+|---|---|---|
+| **Edge TTS** | Cloud | Internet connection; no API key required |
+| **OpenJTalk** | Local | Bundled; requires MeCab on PATH for most Windows setups |
+| **COEIROINK** | Local | Download from [coeiroink.com](https://coeiroink.com/download); must be running at `127.0.0.1:50032` to appear in the voice selector |
+| **VoiceVox** | Local | Stub — not yet implemented |
+
+> **Note:** COEIROINK voices only appear when the COEIROINK server is running. Start it before launching DesktopOCR, or restart the app after starting the server.
