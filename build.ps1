@@ -1,3 +1,7 @@
+# DEPRECATED — use build.bat instead.
+# build.bat provides MSVC detection via vswhere+vcvars64.bat (avoids --msvc=latest SCons crash),
+# icon support (--windows-icon-from-icon=icon.ico), DLL exclusions for smaller builds,
+# and Qt plugin limits. See docs/BUILD.md for details.
 $ErrorActionPreference = "Stop"
 
 Write-Host "Cleaning build directory..."
