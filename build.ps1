@@ -15,6 +15,6 @@ Write-Host "Running Nuitka build..."
     --include-data-dir=assets=assets `
     --output-dir=build `
     --output-filename=DesktopOCR.exe `
-    --windows-disable-console
+    --windows-console-mode=disable
 
 Write-Host "Build complete."
