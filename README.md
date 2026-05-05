@@ -2,12 +2,12 @@
 OCR for Japanese language content (Visual novels, Manga etc). 2026 Edition
 
 ## Version
-DesktopOCR v1.0.0-rc3
+DesktopOCR v1.0.0-rc4
 
 ## What's New in This Release
-- Phase 5 documentation updates — improved user guide, port validation notes, PyInstaller bundling info
-- Zero-risk code cleanup (unused imports removed, PEP8 formatting, invalid QSS removed, tooltips added, `.gitignore` expanded)
-- Pre-release hardening prep (resource path fixes, settings type guards, packaging foundations)
+- **Anki audio positioning redesign** — removed `anki_audio_side` setting; audio is now placed automatically next to `{TargetText}`/`{ContextText}` based on which template contains each placeholder. Fixes audio duplication and missing front audio bugs
+- **QComboBox wheel scroll suppression** — mouse wheel no longer accidentally changes dropdown selections
+- **Code cleanup** — removed unused imports, renumbered section labels, updated documentation
 
 > **Note:** EasyOCR is currently hidden from the engine selector and is not available in this release. Only PaddleOCR and Windows OCR are shown in the UI.
 
@@ -73,7 +73,7 @@ The app auto-creates a **DesktopOCR** note type with 7 fields:
 | Tags | `japanese, vn` | Comma-separated tags on every card |
 | Front Template | `screenshot` | Card front: screenshot, screenshot+text, or text-only |
 | Back Template | `full_with_context` | Card back: full context, selection, or OCR-only |
-| Audio Side | `front` | Attach TTS audio to front, back, or both |
+| Audio | *(auto)* | Target audio next to `{TargetText}`, context audio next to `{ContextText}` — derived from templates. No separate setting needed |
 | Auto-translate | `true` | Silently fetch a translation for the Anki card when saving (not used for in-app translation) |
 
 ### Quick Start

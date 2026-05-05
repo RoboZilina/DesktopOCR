@@ -280,8 +280,8 @@
         <p>Controls what shows on the card back: full context, selection only, or OCR text only.</p>
       </div>
       <div class="card">
-        <span class="pill">Audio Side</span>
-        <p>Which card side gets TTS audio playback: front, back, or both.</p>
+        <span class="pill">Audio</span>
+        <p>TTS audio is placed automatically: target audio next to <code>{TargetText}</code> in whichever template contains it; context audio next to <code>{ContextText}</code> on the back. No separate setting needed.</p>
       </div>
       <div class="card">
         <span class="pill">Auto-translate</span>
@@ -300,7 +300,7 @@
       <li><strong>ContextTranslation</strong> — translation of the context text</li>
       <li><strong>Screenshot</strong> — full-window screenshot as an HTML <code><img></code> tag referencing the file stored in Anki's media collection</li>
     </ul>
-    <p>Audio (if available) is attached as a separate media file linked from the card side chosen in settings.</p>
+    <p>Audio (if available) is injected into the card HTML: target audio appears next to <code>{TargetText}</code>, context audio next to <code>{ContextText}</code>, based on which template contains each placeholder. Audio files are stored in Anki's media collection.</p>
 
     <p style="color:var(--warn);font-weight:bold;">
       ⚠ Anki must be running for AnkiConnect to respond. The 🃏 button is always clickable when visible; if AnkiConnect is unreachable a dialog explains the issue.
@@ -333,7 +333,7 @@
   </div>
 
   <p style="color:var(--text-dim); font-size:13px;">
-    Last updated: May 2026 — DesktopOCR pre-release build.
+    Last updated: June 2026 — DesktopOCR v1.0.0-rc4 pre-release build.
   </p>
 </body>
 </html>

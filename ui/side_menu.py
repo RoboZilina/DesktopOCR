@@ -40,11 +40,10 @@ class SideMenu(QWidget):
     anki_enabled_changed         = pyqtSignal(bool)
     anki_host_changed            = pyqtSignal(str)
     anki_port_changed            = pyqtSignal(int)
-    anki_deck_changed            = pyqtSignal(str)
-    anki_tags_changed            = pyqtSignal(str)
-    anki_front_changed           = pyqtSignal(str)
+    anki_deck_changed             = pyqtSignal(str)
+    anki_tags_changed             = pyqtSignal(str)
+    anki_front_changed            = pyqtSignal(str)
     anki_back_changed            = pyqtSignal(str)
-    anki_audio_side_changed      = pyqtSignal(str)
     anki_auto_translate_changed  = pyqtSignal(bool)
     anki_test_requested          = pyqtSignal()
     reset_requested          = pyqtSignal()
@@ -278,6 +277,7 @@ class SideMenu(QWidget):
 
         openai_form.addWidget(self._create_section_header("OpenAI Model"))
         self._openai_model_combo = QComboBox()
+        self._openai_model_combo.wheelEvent = lambda event: event.ignore()
         self._openai_model_combo.addItems(["gpt-4o-mini", "gpt-4o"])
         self._openai_model_combo.currentTextChanged.connect(self.openai_model_changed.emit)
         openai_form.addWidget(self._openai_model_combo)
@@ -322,6 +322,7 @@ class SideMenu(QWidget):
 
         deepseek_form.addWidget(self._create_section_header("DeepSeek Model"))
         self._deepseek_model_combo = QComboBox()
+        self._deepseek_model_combo.wheelEvent = lambda event: event.ignore()
         self._deepseek_model_combo.addItems(["deepseek-chat"])
         self._deepseek_model_combo.currentTextChanged.connect(
             self.deepseek_model_changed.emit
@@ -394,7 +395,7 @@ class SideMenu(QWidget):
             "<li><strong>Deck Name</strong> — Saved cards go here. Created automatically.</li>"
             "<li><strong>Tags</strong> — Comma-separated tags on each card (default: japanese, vn).</li>"
             "<li><strong>Front / Back Templates</strong> — Which content appears on each side.</li>"
-            "<li><strong>Audio Side</strong> — Attach TTS audio to front, back, or both.</li>"
+            "<li><strong>Audio</strong> — TTS audio is placed automatically next to its text (target audio near selection, context audio near full OCR text).</li>"
             "<li><strong>Auto-translate</strong> — Silently fetches translations when you click 🃏.</li>"
             "</ul>"
             "<p style='color:#fbbf24;font-weight:bold;'>"
@@ -447,21 +448,17 @@ class SideMenu(QWidget):
 
         anki_layout.addWidget(self._create_section_header("Front Template"))
         self._anki_front_combo = QComboBox()
+        self._anki_front_combo.wheelEvent = lambda event: event.ignore()
         self._anki_front_combo.addItems(["screenshot", "screenshot_selection", "selection_only"])
         self._anki_front_combo.currentTextChanged.connect(self.anki_front_changed.emit)
         anki_layout.addWidget(self._anki_front_combo)
 
         anki_layout.addWidget(self._create_section_header("Back Template"))
         self._anki_back_combo = QComboBox()
+        self._anki_back_combo.wheelEvent = lambda event: event.ignore()
         self._anki_back_combo.addItems(["full_with_context", "selection_only", "full_only"])
         self._anki_back_combo.currentTextChanged.connect(self.anki_back_changed.emit)
         anki_layout.addWidget(self._anki_back_combo)
-
-        anki_layout.addWidget(self._create_section_header("Audio Side"))
-        self._anki_audio_side_combo = QComboBox()
-        self._anki_audio_side_combo.addItems(["front", "back", "both"])
-        self._anki_audio_side_combo.currentTextChanged.connect(self.anki_audio_side_changed.emit)
-        anki_layout.addWidget(self._anki_audio_side_combo)
 
         self._anki_auto_translate_toggle = self._add_toggle_section(
             anki_layout,
@@ -799,7 +796,6 @@ class SideMenu(QWidget):
         self.set_anki_tags("japanese, vn")
         self.set_anki_front("screenshot")
         self.set_anki_back("full_with_context")
-        self.set_anki_audio_side("front")
         self.set_anki_auto_translate(True, emit_signal=True)
         self.reset_requested.emit()
 
@@ -1128,18 +1124,6 @@ class SideMenu(QWidget):
         combo = self._anki_back_combo
         block = combo.blockSignals(True)
         idx = combo.findText(mode)
-        if idx >= 0:
-            combo.setCurrentIndex(idx)
-        else:
-            combo.setCurrentIndex(0)
-        combo.blockSignals(block)
-
-    def set_anki_audio_side(self, side: str) -> None:
-        if not hasattr(self, "_anki_audio_side_combo"):
-            return
-        combo = self._anki_audio_side_combo
-        block = combo.blockSignals(True)
-        idx = combo.findText(side)
         if idx >= 0:
             combo.setCurrentIndex(idx)
         else:

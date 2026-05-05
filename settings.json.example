@@ -32,6 +32,5 @@
   "anki_tags": "japanese, vn",
   "anki_front": "screenshot",
   "anki_back": "full_with_context",
-  "anki_audio_side": "front",
   "anki_auto_translate": true
 }

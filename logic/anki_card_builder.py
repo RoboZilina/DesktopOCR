@@ -2,17 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import html
 import logging
 import os
-import time
 from datetime import datetime
 from typing import Any
 
 import cv2
-import numpy as np
 
 from core.capture import ScreenCapture
 from logic.anki_connect import AnkiConnect
@@ -173,7 +170,79 @@ async def build_and_send_card(
             "<div class='context-translation'>{ContextTranslation}</div>"
         )
 
-    # Substitute field values into HTML before assigning to Front/Back.
+    # ------------------------------------------------------------------
+    # 6. Inject [sound:] tags into HTML templates (BEFORE substitution)
+    # ------------------------------------------------------------------
+    # Audio placement is derived from the front/back templates:
+    # - Target audio (idx=0) → next to {TargetText} in front_html if
+    #   {TargetText} is present there, otherwise in back_html.
+    #   FrontSide naturally carries front audio to the back side.
+    # - Context audio (idx>=1) → next to {ContextText} in back_html.
+    #
+    # Audio files are uploaded to Anki's media collection with fields=[]
+    # (no auto-attach). The [sound:...] tags are embedded manually in the
+    # HTML templates before substitution, placing audio next to its text.
+    #
+    # IMPORTANT: This runs BEFORE placeholder substitution so the template
+    # checks ("{TargetText}" in front_html) work correctly.
+    audio_paths = audio_paths or []
+
+    # Build audio dicts (read files) and collect filenames in a single pass.
+    # This avoids a TOCTOU race where a [sound:] tag is injected for a file
+    # that gets deleted before it can be read for the upload dict. If reading
+    # fails for any reason (I/O error, file vanished, etc.) we skip both
+    # the [sound:] injection and the upload for that file.
+    audio_filenames: list[str | None] = []
+    audio_dicts: list[dict[str, Any]] = []
+    for idx, path in enumerate(audio_paths):
+        if path and os.path.isfile(path):
+            try:
+                with open(path, "rb") as f:
+                    audio_b64 = base64.b64encode(f.read()).decode("ascii")
+                filename = f"desktopocr_audio_{timestamp}_{idx}.mp3"
+                audio_filenames.append(filename)
+                audio_dicts.append({
+                    "data": audio_b64,
+                    "filename": filename,
+                    "fields": [],
+                })
+            except Exception:  # noqa: BLE001
+                logger.warning("[Anki] Failed to read audio file %s", path)
+                audio_filenames.append(None)
+        else:
+            audio_filenames.append(None)
+
+    # Inject [sound:] into front_html for target audio (idx=0).
+    # Only if the front template actually displays {TargetText};
+    # otherwise inject into back_html where {TargetText} always lives.
+    if len(audio_filenames) > 0 and audio_filenames[0]:
+        target_sound = f"[sound:{audio_filenames[0]}]"
+        if "{TargetText}" in front_html:
+            front_html = front_html.replace(
+                "{TargetText}", f"{target_sound}{{TargetText}}"
+            )
+        elif "{TargetText}" in back_html:
+            back_html = back_html.replace(
+                "{TargetText}", f"{target_sound}{{TargetText}}"
+            )
+        else:
+            # Fallback: prepend to back if neither template has TargetText
+            back_html = target_sound + back_html
+
+    # Inject [sound:] into back_html for context audio (idx>=1).
+    for idx in range(1, len(audio_filenames)):
+        if audio_filenames[idx]:
+            context_sound = f"[sound:{audio_filenames[idx]}]"
+            if "{ContextText}" in back_html:
+                back_html = back_html.replace(
+                    "{ContextText}", f"{context_sound}{{ContextText}}"
+                )
+            else:
+                back_html = context_sound + back_html
+
+    # ------------------------------------------------------------------
+    # 7. Substitute field values into HTML before assigning to Front/Back.
+    # ------------------------------------------------------------------
     # Anki's card template uses {{FieldName}} syntax in the template itself,
     # but the field values must contain the actual rendered HTML content.
     _subs = {
@@ -212,42 +281,7 @@ async def build_and_send_card(
     )
 
     # ------------------------------------------------------------------
-    # 6. Build audio dicts for all available audio files
-    # ------------------------------------------------------------------
-    # Build audio dicts for all available audio files.
-    # The caller provides both target and context audio when
-    # full_with_context is enabled; AnkiConnect accepts an array.
-    audio_dicts: list[dict[str, Any]] = []
-    audio_paths = audio_paths or []
-    audio_side = config.get("anki_audio_side", "front")
-    if audio_side == "front":
-        audio_fields = ["Front"]
-    elif audio_side == "back":
-        audio_fields = ["Back"]
-    else:  # "both"
-        audio_fields = ["Front", "Back"]
-
-    for idx, path in enumerate(audio_paths):
-        if path and os.path.isfile(path):
-            try:
-                with open(path, "rb") as f:
-                    audio_b64 = base64.b64encode(f.read()).decode("ascii")
-                filename = f"desktopocr_audio_{timestamp}_{idx}.mp3"
-                # Target audio (idx=0) follows user's audio_side setting
-                # (front, back, or both configurable in side menu).
-                # Context audio (idx>=1, e.g. full_with_context) always attaches to Back only,
-                # since ContextText/ContextTranslation render on the back of the card.
-                fields_for_this = audio_fields if idx == 0 else ["Back"]
-                audio_dicts.append({
-                    "data": audio_b64,
-                    "filename": filename,
-                    "fields": fields_for_this,
-                })
-            except Exception:  # noqa: BLE001
-                logger.warning("[Anki] Failed to read audio file %s", path)
-
-    # ------------------------------------------------------------------
-    # 7. Build picture dict for screenshot
+    # 8. Build picture dict for screenshot
     # ------------------------------------------------------------------
     picture_dict: dict | None = None
     if screenshot_b64:
@@ -262,13 +296,13 @@ async def build_and_send_card(
         }
 
     # ------------------------------------------------------------------
-    # 8. Parse tags
+    # 9. Parse tags
     # ------------------------------------------------------------------
     tags_str = config.get("anki_tags", "japanese, vn")
     tags = [t.strip() for t in tags_str.split(",") if t.strip()]
 
     # ------------------------------------------------------------------
-    # 9. Send to Anki
+    # 10. Send to Anki
     # ------------------------------------------------------------------
     deck_name = config.get("anki_deck", "DesktopOCR")
 

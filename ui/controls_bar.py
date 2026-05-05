@@ -72,6 +72,7 @@ class ControlsBar(QWidget):
         self._engine_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold; background: transparent; border: none;")
         layout.addWidget(self._engine_lbl)
         self._engine_combo = QComboBox()
+        self._engine_combo.wheelEvent = lambda event: event.ignore()
         for engine in engines:
             label = self._format_engine_label(engine)
             self._engine_combo.addItem(label, engine)
@@ -88,6 +89,7 @@ class ControlsBar(QWidget):
         self._voice_lbl.setStyleSheet("color: #52525b; font-size: 11px; font-weight: bold; background: transparent; border: none;")
         layout.addWidget(self._voice_lbl)
         self.voice_selector = QComboBox()
+        self.voice_selector.wheelEvent = lambda event: event.ignore()
         self.voice_selector.setObjectName("VoiceSelector")
         self.voice_selector.setMinimumWidth(180)
         self.voice_selector.setMaximumWidth(260)

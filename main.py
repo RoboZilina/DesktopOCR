@@ -1,4 +1,4 @@
-APP_VERSION = "1.0.0-rc3"
+APP_VERSION = "1.0.0-rc4"
 
 import argparse
 import asyncio
@@ -63,7 +63,6 @@ DEFAULT_SETTINGS = {
     "anki_tags": "japanese, vn",
     "anki_front": "screenshot",
     "anki_back": "full_with_context",
-    "anki_audio_side": "front",
     "anki_auto_translate": True,
 }
 
@@ -104,8 +103,6 @@ def load_settings() -> dict:
         settings["anki_front"] = "screenshot"
     if not isinstance(settings.get("anki_back"), str):
         settings["anki_back"] = "full_with_context"
-    if not isinstance(settings.get("anki_audio_side"), str):
-        settings["anki_audio_side"] = "front"
     if not isinstance(settings.get("anki_auto_translate"), bool):
         settings["anki_auto_translate"] = True
     # Boolean type guards for all remaining bool settings
@@ -876,8 +873,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 window.side_menu.set_anki_front(settings_state.get("anki_front", "screenshot"))
             if hasattr(window.side_menu, "set_anki_back"):
                 window.side_menu.set_anki_back(settings_state.get("anki_back", "full_with_context"))
-            if hasattr(window.side_menu, "set_anki_audio_side"):
-                window.side_menu.set_anki_audio_side(settings_state.get("anki_audio_side", "front"))
             if hasattr(window.side_menu, "set_anki_auto_translate"):
                 window.side_menu.set_anki_auto_translate(
                     settings_state.get("anki_auto_translate", True), emit_signal=False
@@ -958,8 +953,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     window.side_menu.set_anki_front(defaults.get("anki_front", "screenshot"))
                 if hasattr(window.side_menu, "set_anki_back"):
                     window.side_menu.set_anki_back(defaults.get("anki_back", "full_with_context"))
-                if hasattr(window.side_menu, "set_anki_audio_side"):
-                    window.side_menu.set_anki_audio_side(defaults.get("anki_audio_side", "front"))
                 if hasattr(window.side_menu, "set_anki_auto_translate"):
                     window.side_menu.set_anki_auto_translate(defaults.get("anki_auto_translate", True), emit_signal=es)
 
@@ -1188,11 +1181,6 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 settings_state["anki_back"] = mode
                 _do_save()
             window.side_menu.anki_back_changed.connect(_on_anki_back_changed)
-
-            def _on_anki_audio_side_changed(side: str):
-                settings_state["anki_audio_side"] = side
-                _do_save()
-            window.side_menu.anki_audio_side_changed.connect(_on_anki_audio_side_changed)
 
             def _on_anki_auto_translate_changed(enabled: bool):
                 settings_state["anki_auto_translate"] = enabled
