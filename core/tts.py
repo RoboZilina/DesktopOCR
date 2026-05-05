@@ -60,13 +60,11 @@ class EdgeTTS:
                         audio_bytes += chunk["data"]
                 if audio_bytes:
                     logger.info("EdgeTTS.speak() got %d bytes", len(audio_bytes))
-                    # Clean up previous temp file if it still exists
-                    if self._last_audio_path:
-                        try:
-                            os.unlink(self._last_audio_path)
-                        except OSError:
-                            pass
-                    # Save audio to temp file (always — for Anki attachment)
+                    # Save audio to temp file (always — for Anki attachment).
+                    # NOTE: Do NOT clean up previous temp files here — the caller
+                    # (main.py) may call generate() multiple times (selection +
+                    # context audio), and deleting the previous file would destroy
+                    # the first path before the card builder can read it.
                     try:
                         fd, path = tempfile.mkstemp(suffix=".mp3", prefix="desktopocr_anki_")
                         with os.fdopen(fd, "wb") as f:

@@ -1064,7 +1064,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
 
                     back_mode = settings_state.get("anki_back", "full_with_context")
                     needs_context_audio = (
-                        back_mode == "full_with_context"
+                        back_mode in ("full_with_context", "full_only")
                         and selection_text
                         and selection_text.strip()
                         and ocr_text

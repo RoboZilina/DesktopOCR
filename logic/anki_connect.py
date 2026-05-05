@@ -290,7 +290,7 @@ class AnkiConnect:
             "modelName": "DesktopOCR",
             "fields": fields,
             "tags": tags or [],
-            "options": {"allowDuplicate": False},
+            "options": {"allowDuplicate": True},
         }
         if audio is not None:
             if isinstance(audio, list):
