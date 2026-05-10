@@ -473,6 +473,16 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                             continue
                         crop = debug_frame[y1:y2, x1:x2].copy()
                         cv2.imwrite(str(dbg_dir / f"debug_once_box_{i:02d}.png"), crop)
+                        # Also run recognition on each individual box crop
+                        box_score = float(b[4]) if len(b) > 4 else None
+                        box_rec = await ocr_impl.recognize(crop)
+                        box_text = (box_rec.get("text", "") or "").strip()
+                        box_conf = float(box_rec.get("confidence", 0.0) or 0.0)
+                        logger.info(
+                            "Debug box #%d | score=%.4f | rec_conf=%.4f | text=%r | crop=%dx%d",
+                            i, box_score or 0.0, box_conf, box_text,
+                            crop.shape[1], crop.shape[0],
+                        )
 
                     overlay = debug_frame.copy()
                     for b in boxes:
@@ -1242,12 +1252,15 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                 return summary
 
             # Wire re-capture button in tray to force immediate OCR
+            _recapture_requested = False  # set True by button, consumed by _ocr_task
+
             def _on_recapture():
-                nonlocal _capture_gen
+                nonlocal _capture_gen, _recapture_requested
                 if hwnd is None:
                     QMessageBox.warning(window, "No area selected",
                                         "Please select a source window first.")
                     return
+                _recapture_requested = True
                 logger.debug("[Recapture] Button clicked — bumping gen to %d, invalidating pipeline, firing trigger",
                             _capture_gen + 1)
                 # Bump generation to invalidate any in-flight OCR result,
@@ -1290,7 +1303,7 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                     await asyncio.sleep(PREVIEW_INTERVAL)
 
             async def _ocr_task():
-                nonlocal _capture_gen
+                nonlocal _capture_gen, _recapture_requested
                 while not stop_event.is_set():
                     try:
                         if not streaming_enabled:
@@ -1299,15 +1312,29 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         if not selection_ready:
                             await asyncio.sleep(0.2)
                             continue
+
+                        # Consume the recapture flag BEFORE waiting on the trigger,
+                        # so a recapture that arrived while we were processing still
+                        # takes effect on the next loop iteration.
+                        is_recapture = _recapture_requested
+                        if is_recapture:
+                            _recapture_requested = False
+                            logger.debug("[OCR] Recapture flag consumed — will force fresh capture")
+
                         if settings_state["auto_capture"]:
                             try:
                                 await asyncio.wait_for(ocr_trigger.wait(), timeout=0.5)
                                 ocr_trigger.clear()
                             except asyncio.TimeoutError:
-                                continue
+                                # If a recapture was requested but the trigger was
+                                # already consumed (e.g. by a previous iteration),
+                                # proceed anyway — the flag is still set.
+                                if not is_recapture:
+                                    continue
                             _capture_gen += 1
                             this_gen = _capture_gen
-                            logger.debug("[OCR] Auto trigger consumed (gen=%d)", this_gen)
+                            logger.debug("[OCR] Auto trigger consumed (gen=%d, recapture=%s)",
+                                         this_gen, is_recapture)
                         else:
                             # Manual mode: wait for Re-capture button only
                             try:
@@ -1327,12 +1354,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         if this_gen is None and window is not None:
                             window.set_status("Processing…", "")
                         ocr_started = time.perf_counter()
-                        # Manual recapture (this_gen is None) forces get_frame()
-                        # to bypass the MD5 frame-diff check, guaranteeing a
-                        # fresh capture even on static/transparent windows.
+                        # Manual recapture (this_gen is None) or recapture button
+                        # (is_recapture) forces get_frame() to bypass the MD5
+                        # frame-diff check, guaranteeing a fresh capture even on
+                        # static/transparent windows.
                         res = await pipeline.capture_once(
                             line_count=_selected_line_count(),
-                            force=(this_gen is None),
+                            force=(this_gen is None or is_recapture),
                         )
                         elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
 

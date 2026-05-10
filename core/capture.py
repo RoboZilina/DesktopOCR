@@ -187,7 +187,36 @@ def _capture_bitblt(hwnd: int) -> Optional[np.ndarray]:
         width = rect.right - rect.left
         height = rect.bottom - rect.top
         if width <= 0 or height <= 0:
-            log.warning("_capture_bitblt: zero client area for HWND=0x%X (w=%d, h=%d)", hwnd, width, height)
+            # Diagnose why: check window placement (minimized vs. zero-sized)
+            try:
+                # WINDOWPLACEMENT struct (not in ctypes.wintypes, define manually)
+                class WINDOWPLACEMENT(ctypes.Structure):
+                    _fields_ = [
+                        ("length", ctypes.c_uint),
+                        ("flags", ctypes.c_uint),
+                        ("showCmd", ctypes.c_uint),
+                        ("ptMinPosition_x", ctypes.c_long),
+                        ("ptMinPosition_y", ctypes.c_long),
+                        ("ptMaxPosition_x", ctypes.c_long),
+                        ("ptMaxPosition_y", ctypes.c_long),
+                        ("rcNormalPosition_left", ctypes.c_long),
+                        ("rcNormalPosition_top", ctypes.c_long),
+                        ("rcNormalPosition_right", ctypes.c_long),
+                        ("rcNormalPosition_bottom", ctypes.c_long),
+                    ]
+                wp = WINDOWPLACEMENT()
+                wp.length = ctypes.sizeof(WINDOWPLACEMENT)
+                user32.GetWindowPlacement(hwnd, ctypes.byref(wp))
+                show_cmd = wp.showCmd  # 1=normal, 2=minimized, 3=maximized
+                is_visible = bool(user32.IsWindowVisible(hwnd))
+                log.warning(
+                    "_capture_bitblt: zero client area for HWND=0x%X "
+                    "(w=%d, h=%d, showCmd=%d, visible=%d, minimized=%s)",
+                    hwnd, width, height, show_cmd, is_visible,
+                    show_cmd == 2,
+                )
+            except Exception:
+                log.warning("_capture_bitblt: zero client area for HWND=0x%X (w=%d, h=%d)", hwnd, width, height)
             return None
 
         dpi_scale = 1.0
@@ -375,12 +404,14 @@ class ScreenCapture:
 
         try:
             if self._use_bitblt:
+                log.debug("[Capture] Using BitBlt path (full=%s, force=%s)", full, force)
                 frame = await self._get_frame_bitblt(full=full, force=force)
                 if frame is not None:
                     log.debug("[Capture] BitBlt returned frame shape=%s (full=%s, force=%s)", frame.shape, full, force)
                 else:
                     log.debug("[Capture] BitBlt returned None (full=%s, force=%s)", full, force)
                 return frame
+            log.debug("[Capture] Using WinRT path (full=%s, force=%s)", full, force)
             frame = await self._get_frame_winrt(full=full, force=force)
             if frame is not None:
                 log.debug("[Capture] WinRT returned frame shape=%s (full=%s, force=%s)", frame.shape, full, force)
@@ -659,16 +690,19 @@ class ScreenCapture:
             target = frame[ry:ry + rh, rx:rx + rw]
 
         # When force=True, skip the MD5 frame-diff check entirely.
-        # Used by the Anki screenshot path to guarantee a fresh capture.
+        # Used by the Anki screenshot path and manual re-capture button
+        # to guarantee a fresh capture.
         # Still update the hash so the next regular capture doesn't match stale state.
         if force:
             new_hash = hashlib.md5(target.tobytes()).hexdigest()
             if full:
                 self._last_full_hash = new_hash
                 self._last_frame = target.copy()
-                log.debug("_apply_diff_and_crop: force=True, full=True — _last_frame set (shape=%s)", target.shape)
+                log.debug("[DiffCheck] force=True, full=True — _last_frame set (shape=%s, hash=%s)",
+                          target.shape, new_hash[:12])
             else:
                 self._last_crop_hash = new_hash
+                log.debug("[DiffCheck] force=True, crop — hash updated (%s)", new_hash[:12])
             return target
 
         # Frame diff — mirrors the pattern from instructions.md / capture_pipeline.js

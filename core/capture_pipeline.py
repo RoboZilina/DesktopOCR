@@ -81,9 +81,13 @@ class CapturePipeline:
             my_gen = self.capture_generation
             
             try:
+                logger.debug("[CaptureOnce] get_frame(force=%s) starting (gen=%d)", force, my_gen)
                 frame = await self.capture.get_frame(force=force)
                 if frame is None:
+                    logger.debug("[CaptureOnce] get_frame returned None (force=%s, gen=%d)", force, my_gen)
                     return None
+                logger.debug("[CaptureOnce] get_frame returned shape=%s (force=%s, gen=%d)",
+                             frame.shape, force, my_gen)
                 
                 if self.capture_generation != my_gen:
                     return None
