@@ -1,4 +1,6 @@
 import logging
+import os
+import tempfile
 
 import requests
 import numpy as np
@@ -15,6 +17,62 @@ class COEIROINKBackend(TTSBackend):
         self.base_url = "http://127.0.0.1:50032"
         self.speaker_uuid = speaker_uuid
         self.style_id = style_id
+        self.last_audio_path: str | None = None
+
+    def _build_payload(self, text: str) -> dict:
+        """Build the JSON payload for the COEIROINK /v1/predict endpoint."""
+        return {
+            "speakerUuid": self.speaker_uuid,
+            "styleId": self.style_id,
+            "text": text,
+            "speedScale": 1.0,
+            "volumeScale": 1.0,
+            "pitchScale": 0.0,
+            "intonationScale": 1.0,
+            "prePhonemeLength": 0.1,
+            "postPhonemeLength": 0.1,
+        }
+
+    def _call_api(self, text: str) -> bytes | None:
+        """Call the COEIROINK TTS API and return raw WAV bytes, or None on failure."""
+        if not text or not text.strip():
+            return None
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/predict",
+                json=self._build_payload(text),
+                timeout=60,
+            )
+            if response.content == b"Internal Server Error":
+                logger.warning("Internal Server Error (invalid speaker/style?)")
+                return None
+            response.raise_for_status()
+            return response.content
+        except requests.exceptions.ConnectionError:
+            logger.warning("Engine not running")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.error("Error: %s", e)
+            return None
+
+    async def generate(self, text: str) -> str | None:
+        """Generate audio for *text* silently (no playback) and return the temp path.
+
+        Used by the Anki integration to produce audio attachments.
+        """
+        wav_bytes = self._call_api(text)
+        if wav_bytes is None:
+            return None
+        try:
+            fd, path = tempfile.mkstemp(suffix=".wav", prefix="desktopocr_anki_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(wav_bytes)
+            self.last_audio_path = path
+            logger.info("COEIROINK generate() saved audio to %s", path)
+            return path
+        except Exception as exc:
+            logger.error("COEIROINK generate() failed to save audio: %s", exc)
+            return None
 
     def list_voices(self):
         try:
@@ -58,42 +116,11 @@ class COEIROINKBackend(TTSBackend):
         self.style_id = voice_id
 
     def speak(self, text):
-        if not text or not text.strip():
+        wav_bytes = self._call_api(text)
+        if wav_bytes is None:
             return None
-
-        try:
-            response = requests.post(
-                f"{self.base_url}/v1/predict",
-                json={
-                    "speakerUuid": self.speaker_uuid,
-                    "styleId": self.style_id,
-                    "text": text,
-                    "speedScale": 1.0,
-                    "volumeScale": 1.0,
-                    "pitchScale": 0.0,
-                    "intonationScale": 1.0,
-                    "prePhonemeLength": 0.1,
-                    "postPhonemeLength": 0.1,
-                },
-                timeout=60,
-            )
-
-            if response.content == b"Internal Server Error":
-                logger.warning("Internal Server Error (invalid speaker/style?)")
-                return None
-
-            response.raise_for_status()
-
-            wav_bytes = response.content
-            pcm, sr = self._wav_bytes_to_pcm(wav_bytes)
-            return pcm, sr
-
-        except requests.exceptions.ConnectionError:
-            logger.warning("Engine not running")
-            return None
-        except requests.exceptions.RequestException as e:
-            logger.error("Error: %s", e)
-            return None
+        pcm, sr = self._wav_bytes_to_pcm(wav_bytes)
+        return pcm, sr
 
     def _wav_bytes_to_pcm(self, wav_bytes):
         import struct

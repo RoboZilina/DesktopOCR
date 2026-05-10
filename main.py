@@ -1327,7 +1327,13 @@ async def main(hwnd, gui_mode=True, window=None, window_title=""):
                         if this_gen is None and window is not None:
                             window.set_status("Processing…", "")
                         ocr_started = time.perf_counter()
-                        res = await pipeline.capture_once(line_count=_selected_line_count())
+                        # Manual recapture (this_gen is None) forces get_frame()
+                        # to bypass the MD5 frame-diff check, guaranteeing a
+                        # fresh capture even on static/transparent windows.
+                        res = await pipeline.capture_once(
+                            line_count=_selected_line_count(),
+                            force=(this_gen is None),
+                        )
                         elapsed_ms = (time.perf_counter() - ocr_started) * 1000.0
 
                         # Discard stale result if a newer trigger fired during OCR

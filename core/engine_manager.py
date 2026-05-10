@@ -481,6 +481,11 @@ class EngineManager:
         work_image = preprocess_paddle_slice(image)
         detected_boxes = await self._current_instance.detect(work_image)
         boxes_raw = len(detected_boxes)
+        if boxes_raw > 0:
+            scores = [f"{b[4]:.4f}" for b in detected_boxes if len(b) > 4]
+            logger.debug("[PaddlePass] detection returned %d boxes, scores=[%s]", boxes_raw, ", ".join(scores[:10]))
+        else:
+            logger.debug("[PaddlePass] detection returned 0 boxes — no text regions found")
         h_img, w_img = work_image.shape[:2]
         filtered_boxes = self._filter_boxes(detected_boxes, w_img, h_img)
         deduped_boxes, dedup_stats = self._deduplicate_boxes(filtered_boxes)
@@ -629,6 +634,7 @@ class EngineManager:
         if not boxes:
             logger.info("[BoxFilter] 0/0 boxes kept after filtering (image %dx%d)", w, h)
             return []
+        logger.debug("[BoxFilter] received %d boxes from detection for filtering (image %dx%d)", total, w, h)
 
         min_w = max(_DET_MIN_WIDTH_ABS, int(w * _DET_MIN_WIDTH_PCT))
         min_h = max(_DET_MIN_HEIGHT_ABS, int(h * _DET_MIN_HEIGHT_PCT))
@@ -732,7 +738,9 @@ class EngineManager:
 
     def _apply_pre_recognition_gate(self, image: np.ndarray, boxes: list[list[int]]) -> tuple[list[list[int]], dict]:
         if not boxes:
+            logger.debug("[PreRecGate] 0 boxes to gate")
             return [], {"kept": 0, "dropped": 0, "reasons": {}, "suspect_density": 0, "suspect_details": [], "cap_hits": 0}
+        logger.debug("[PreRecGate] gating %d boxes", len(boxes))
 
         h, w = image.shape[:2]
         frame_area = max(1, w * h)
@@ -1082,9 +1090,9 @@ class EngineManager:
 
         collapsed = [span_left, span_top, span_right, span_bottom, *extras]
         self._set_box_flag(collapsed, _PRUNE_SINGLE_SPAN_FLAG)
-        self._dbg(
-            f"[SingleSpan] collapsed {len(boxes)} boxes -> span {[span_left, span_top, span_right, span_bottom]} "
-            f"union_ratio={union_ratio:.3f} tier={horizontal_tier}"
+        logger.debug(
+            "[SingleSpan] collapsed %d boxes -> span [%d,%d,%d,%d] union_ratio=%.3f tier=%s",
+            len(boxes), span_left, span_top, span_right, span_bottom, union_ratio, horizontal_tier,
         )
         meta = {
             "single_span": True,
@@ -1298,7 +1306,9 @@ class EngineManager:
 
     async def _recognize_box_groups(self, image: np.ndarray, boxes: list[list[int]], expand_for_recognition: bool = True) -> tuple[dict, dict]:
         if not boxes:
+            logger.debug("[RecogGroups] 0 boxes to recognize")
             return {"text": "", "confidence": 0.0}, {"normalized": 0, "trimmed": 0, "padded": 0, "boosted": 0}
+        logger.debug("[RecogGroups] recognizing %d boxes on image %dx%d", len(boxes), image.shape[1], image.shape[0])
 
         logger.debug("OCR: starting recognition for %d boxes", len(boxes))
 

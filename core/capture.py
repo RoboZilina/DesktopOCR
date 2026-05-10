@@ -375,8 +375,18 @@ class ScreenCapture:
 
         try:
             if self._use_bitblt:
-                return await self._get_frame_bitblt(full=full, force=force)
-            return await self._get_frame_winrt(full=full, force=force)
+                frame = await self._get_frame_bitblt(full=full, force=force)
+                if frame is not None:
+                    log.debug("[Capture] BitBlt returned frame shape=%s (full=%s, force=%s)", frame.shape, full, force)
+                else:
+                    log.debug("[Capture] BitBlt returned None (full=%s, force=%s)", full, force)
+                return frame
+            frame = await self._get_frame_winrt(full=full, force=force)
+            if frame is not None:
+                log.debug("[Capture] WinRT returned frame shape=%s (full=%s, force=%s)", frame.shape, full, force)
+            else:
+                log.debug("[Capture] WinRT returned None (full=%s, force=%s)", full, force)
+            return frame
         except Exception as exc:
             log.error("get_frame error (full=%s, force=%s): %s", full, force, exc, exc_info=True)
             return None
@@ -666,14 +676,16 @@ class ScreenCapture:
         
         if full:
             if new_hash == self._last_full_hash:
-                log.debug("_apply_diff_and_crop: full-frame MD5 match — returning None")
+                log.debug("[DiffCheck] full-frame MD5 match — returning None (hash=%s)", new_hash[:12])
                 return None  # identical region — skip
             self._last_full_hash = new_hash
             self._last_frame = target.copy()
-            log.debug("_apply_diff_and_crop: full=True — _last_frame set (shape=%s, hash=%s)", target.shape, new_hash[:12])
+            log.debug("[DiffCheck] full=True — _last_frame set (shape=%s, hash=%s)", target.shape, new_hash[:12])
         else:
             if new_hash == self._last_crop_hash:
+                log.debug("[DiffCheck] crop MD5 match — returning None (hash=%s)", new_hash[:12])
                 return None  # identical region — skip
+            log.debug("[DiffCheck] crop MD5 changed — new hash=%s", new_hash[:12])
             self._last_crop_hash = new_hash
 
         return target

@@ -300,8 +300,16 @@ class PaddleOCR:
                 score = float(component_values.mean()) if component_values.size > 0 else 0.0
 
                 if score < DET_BOX_THRESHOLD:
-
+                    logger.debug(
+                        "[DetScore] box label=%d score=%.4f < threshold=%.2f — filtered out",
+                        label, score, DET_BOX_THRESHOLD,
+                    )
                     continue
+                else:
+                    logger.debug(
+                        "[DetScore] box label=%d score=%.4f >= threshold=%.2f — KEPT",
+                        label, score, DET_BOX_THRESHOLD,
+                    )
 
                 box_w = p_max_x - p_min_x
 

@@ -64,9 +64,16 @@ class CapturePipeline:
         """Bump generation counter so in-flight OCR results are discarded."""
         self.capture_generation += 1
 
-    async def capture_once(self, *, line_count: int = 3) -> dict | None:
+    async def capture_once(self, *, line_count: int = 3, force: bool = False) -> dict | None:
         """
         Captures a frame and processes it via the OCR engine.
+
+        Args:
+            line_count: Number of text lines to expect (for band slicing).
+            force: If True, bypass the MD5 frame-diff check in get_frame()
+                   so a fresh capture is guaranteed. Used by the manual
+                   re-capture button to force OCR even on static frames.
+
         Returns {"text": str, "confidence": float} or None.
         """
         async with self._lock:
@@ -74,7 +81,7 @@ class CapturePipeline:
             my_gen = self.capture_generation
             
             try:
-                frame = await self.capture.get_frame()
+                frame = await self.capture.get_frame(force=force)
                 if frame is None:
                     return None
                 
