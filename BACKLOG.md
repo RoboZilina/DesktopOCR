@@ -162,3 +162,4 @@ Resolved items are moved to a separate section at the bottom.
 | `main_window.py` `label_map` had `"deepl"` instead of `"mymemory"` — incorrect display label | 2026-05-04 | Corrected to `"mymemory": "MyMemory"` |
 | `build.ps1` lacks MSVC detection and icon support (superseded by `build.bat`) | 2026-05-04 | Deprecated `build.ps1` with header pointing to `build.bat` |
 | COEIROINK TTS `generate()` missing — Anki cards created without audio | 2026-05-10 | Added `generate()` method that saves WAV to temp file and returns path. Also refactored `speak()` to share `_call_api()` helper. |
+| Recapture button does not force fresh capture when auto-capture is enabled | 2026-05-10 | Added `_recapture_requested` flag consumed before trigger wait; passes `force=True` to `capture_once()` → `get_frame()` to bypass MD5 frame-diff gate |
