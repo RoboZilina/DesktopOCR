@@ -126,13 +126,28 @@ Resolved items are moved to a separate section at the bottom.
 | Feature | Status | Notes |
 |---------|--------|-------|
 | VoiceVox TTS | Stub | `__init__` only, no implementation |
-| COEIROINK TTS | Stub | Partial implementation, not functional |
 | OpenJTalk TTS | Partial | Requires MeCab on PATH — doesn't work on most Windows setups |
 | LibreTranslateBackend | Dead | File kept on disk but module is not imported anywhere; not ported to `main` |
 | DeepLBackend | Dead | File kept on disk but not imported anywhere; replaced by MyMemory on `main` |
 | ONNX INT8 quantization | Pending | Models are graph-optimized but still FP32 |
 | Anki "auto-translate" | Pending | UI control exists but not wired to translation pipeline |
 | ONNX Runtime CUDA/TensorRT | Pending | Currently uses DirectML only |
+
+---
+
+## Low Severity
+
+### `hasattr` check for TTS `generate()` is always `True`
+- **File**: [`main.py:1060`](main.py:1060)
+- **Issue**: `hasattr(tts_backend, "generate")` is always `True` because the base class [`TTSBackend`](tts/base.py:9) defines a default `generate()` that returns `None`. The `if path:` guard catches the `None` return correctly, but the `hasattr` check provides no useful signal — it can't distinguish between a proper override (EdgeTTS) and the base default (VoiceVox, OpenJTalk).
+- **Impact**: None — the `if path:` guard works correctly. Cosmetic code clarity issue.
+- **Reported**: 2026-05-10 Anki pipeline review
+
+### TTS temp files never cleaned up after card creation
+- **File**: [`core/tts.py:69`](core/tts.py:69), [`tts/coeiroink_backend.py:67`](tts/coeiroink_backend.py:67)
+- **Issue**: Temp files created by `tempfile.mkstemp()` are never deleted. The comment in `core/tts.py:64-67` explains they can't be deleted immediately (multiple `generate()` calls before the card builder reads them). After the card builder reads them at [`logic/anki_card_builder.py:200`](logic/anki_card_builder.py:200), they could be cleaned up but aren't.
+- **Impact**: Minor disk leak — files accumulate in `%TEMP%` over long sessions. Windows temp cleanup or reboot handles this.
+- **Reported**: 2026-05-10 Anki pipeline review
 
 ---
 
@@ -146,3 +161,4 @@ Resolved items are moved to a separate section at the bottom.
 | `main_window.py` missing `QIcon` import + `setWindowIcon()` — no taskbar icon in Nuitka builds | 2026-05-04 | Added `QIcon` import, `setWindowIcon()` block after `setWindowTitle()` |
 | `main_window.py` `label_map` had `"deepl"` instead of `"mymemory"` — incorrect display label | 2026-05-04 | Corrected to `"mymemory": "MyMemory"` |
 | `build.ps1` lacks MSVC detection and icon support (superseded by `build.bat`) | 2026-05-04 | Deprecated `build.ps1` with header pointing to `build.bat` |
+| COEIROINK TTS `generate()` missing — Anki cards created without audio | 2026-05-10 | Added `generate()` method that saves WAV to temp file and returns path. Also refactored `speak()` to share `_call_api()` helper. |
